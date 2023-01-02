@@ -1,0 +1,55 @@
+//Game & graphics driver for gameBadgePico (MGC 2023)
+
+#ifndef gameBadgePico_h
+#define gameBadgePico_h
+
+#include "Arduino.h"
+#include "hardware/spi.h"
+
+	void gamebadge3init();
+	void setGPIObutton(int which);
+	bool button(int which);
+	bool loadRGB(const char* path);
+	void loadPalette(const char* path);
+	void loadPattern(const char* path, uint16_t start, uint16_t length);
+	
+	void setWinYJump(int flag, int jumpFrom, int nextRow);
+	void setSpriteWindow(uint8_t x0, uint8_t x1, uint8_t y0, uint8_t y1);
+	void setWindow(uint8_t x, uint8_t y);
+	void setWindowSlice(int whichRow, uint8_t x);
+	void setCoarseYRollover(int topRow, int bottomRow);
+	void sendFrame();
+	void dmaX(int whatChannel, const void* data, int whatSize);
+	bool isDMAbusy(int whatChannel);
+
+	void drawTile(int xPos, int yPos, char whatTile, char whatPalette);
+	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette);
+	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette);
+	void clearSprite();
+	void updatePattern(uint16_t position, char lowByte, char highByte);
+	void updatePalette(int position, char theIndex);
+	void updatePaletteRGB(int position, char r, char g, char b);
+	void convertBitplanePattern(uint16_t position, unsigned char *lowBitP, unsigned char *highBitP);
+
+	void playAudio(const char* path);
+	void serviceAudio();
+	bool fillAudioBuffer(int whichOne);
+	void dmaAudio();
+	static void dma_handler_buffer0();
+	static void dma_handler_buffer1();	
+	int32_t msc_read_cb (uint32_t lba, void* buffer, uint32_t bufsize);
+	int32_t msc_write_cb (uint32_t lba, uint8_t* buffer, uint32_t bufsize);
+	void msc_flush_cb (void);
+
+	#define C_but			2
+	#define B_but			3
+	#define A_but			4	
+	#define start_but		5
+	#define select_but		21
+	#define up_but 			6
+	#define down_but		8
+	#define left_but		7
+	#define right_but		9
+
+
+#endif

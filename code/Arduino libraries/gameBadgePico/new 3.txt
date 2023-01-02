@@ -1,0 +1,107 @@
+	for (int yChar = 0 ; yChar < 15 ; yChar++) {                  //Half rez mode 15x15 char. We DMA one line of char at a time (3840 shorts)
+
+		uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
+
+		gpio_put(11, 1);									//Scope testing
+
+		for (int g = 0 ; g < 15 ; g++) {					//Copy one row of characters into buffer = Less math later on
+			tempTableRow[g] = nameTable[g][yChar];
+			tempPaletteRow[g] = nameTable[32 + g][yChar];
+		}
+
+		for (int yLine = 0 ; yLine < 16; yLine++) {         			//Each char line is 16 pixels in ST7789 memory, so we send each vertical line twice
+
+			//When drawing odd LCD lines we reuse the last line of the sprite buffer (double high) as erase it as we draw
+			//This saves clear time per frame, and by doing the sprite erase check out here, not per pixel, saves 200us per table row/16 lines/per DMA xfer
+			if (yLine & 0x01) {											//Drawing odd line on LCD/second line of fat pixels?							
+				sp -= 120;												//Revert sprite buffer point to draw every line twice
+				
+				for (int xChar = 0 ; xChar < 15 ; xChar++) {      		//15 characters wide
+
+					uint16_t temp = patternTable[(tempTableRow[xChar] * 8) + (yLine >> 1)];	//Get temp char from row buffer, uses less math that directly from nametable
+
+					for (int xPixel = 0 ; xPixel < 8 ; xPixel++) {  	//Our chars are 8 "fat" pixels wide, which is 16 wide in ST7789 memory
+
+						uint16_t twoBits = temp >> 14;		//Get top 2 bits  and shift them into a temp LSB 				//Get top 2 bits  and shift them into a temp LSB
+
+						if (*sp == 0xF81F) {							//Transparent sprite pixel? Draw background color...
+						
+							uint16_t tempShort = nesPaletteRGBtable[palette[(tempPaletteRow[xChar] * 4) + twoBits]];
+							
+							//uint16_t tempShort = nesPaletteRGBtable[twoBits];
+							
+							
+							//uint16_t tempShort = testy[twoBits];
+						
+							//uint16_t tempShort = nesPaletteRGBtable[testy[twoBits]];
+						
+							*pointer++ = tempShort;						//...twice (fat pixels)
+							*pointer++ = tempShort;
+						
+							// *pointer++ = palette[twoBits];				
+							// *pointer++ = palette[twoBits];				
+						}
+						else{                							//Else draw sprite pixel...
+							*pointer++ = *sp;							//..twice (fat pixels)
+							*pointer++ = *sp;	
+						}
+						
+						*sp = 0xF81F;									//When rendering the doubled sprite line, erase it so it's empty for next frame
+
+						sp++;
+
+						temp <<= 2;
+
+					}
+				}				
+			} 
+			else {
+
+				for (int xChar = 0 ; xChar < 15 ; xChar++) {      			//15 characters wide
+
+					uint16_t temp = patternTable[(tempTableRow[xChar] * 8) + (yLine >> 1)];	//Get temp char from row buffer, uses less math that directly from nametable
+
+					for (int xPixel = 0 ; xPixel < 8 ; xPixel++) {  	//Our chars are 8 "fat" pixels wide, which is 16 wide in ST7789 memory
+
+						uint16_t twoBits = temp >> 14;					//Get top 2 bits  and shift them into a temp LSB 
+
+						if (*sp == 0xF81F) {							//Transparent sprite pixel? Draw background color...
+						
+							uint16_t tempShort = nesPaletteRGBtable[palette[(tempPaletteRow[xChar] * 4) + twoBits]];
+							//uint16_t tempShort = nesPaletteRGBtable[palette[twoBits]];
+							
+							//uint16_t tempShort = nesPaletteRGBtable[twoBits];
+							
+							//uint16_t tempShort = testy[twoBits];
+							
+							//uint16_t tempShort = nesPaletteRGBtable[testy[twoBits]];
+						
+							*pointer++ = tempShort;						//...twice (fat pixels)
+							*pointer++ = tempShort;					
+	
+						}
+						else{                							//Else draw sprite pixel...
+							*pointer++ = *sp;							//..twice (fat pixels)
+							*pointer++ = *sp;	
+						}
+
+						sp++;
+
+						temp <<=  2;
+
+					}
+				}
+			}
+			
+			
+		}
+
+		gpio_put(11, 0);
+
+		dmaX(0, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
+
+		if (++whichBuffer > 1) {							//Switch up buffers, we will draw the next while the prev is being DMA'd to LCD
+			whichBuffer = 0;
+		}
+
+	}

@@ -1,0 +1,27 @@
+.program audio
+
+; Repeatedly get one word of data from the TX FIFO, stalling when the FIFO is
+; empty. Write the least significant bit to the OUT pin group.
+
+loop:
+    pull block
+	out x, 4					;Dump 4 LSB into X
+	out pins, 4					;Send upper nibble to pins 10-13
+    jmp loop
+
+% c-sdk {
+	//								0 or 1,     0-3,   code pointer,  GPIO pin #
+static inline void audio_program_init(PIO pio, uint sm, uint offset, uint pin) {
+	
+    pio_sm_config c = audio_program_get_default_config(offset);	//Get PIO structure
+    sm_config_set_out_pins(&c, pin, 4);// Map the state machine's OUT pin group to one pin, namely the `pin` parameter to this function.
+    		
+    for (uint i = 0; i < 4 ; i++) {		
+		pio_gpio_init(pio, pin + i);	
+	}	
+			  
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 4, true);		// Set the pin direction to output at the PIO https://raspberrypi.github.io/pico-sdk-doxygen/group__hardware__pio.html 
+    pio_sm_init(pio, sm, offset, &c);					// Load our configuration, and jump to the start of the program    
+    pio_sm_set_enabled(pio, sm, true);					// Set the state machine running
+}
+%}
