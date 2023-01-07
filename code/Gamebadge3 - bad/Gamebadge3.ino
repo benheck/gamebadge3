@@ -15,6 +15,11 @@ int dir = 0;
 
 int debounce = 0;
 
+bool timer_isr(struct repeating_timer *t) {				//Every 33ms, set the flag that it's time to draw a new frame (it's possible system might miss one but that's OK)
+	nextFrameFlag = true;
+	return true;
+}
+
 void setup() { //------------------------Core0 handles the file system and game logic
 
 	gamebadge3init();
@@ -22,9 +27,9 @@ void setup() { //------------------------Core0 handles the file system and game 
 	if (loadRGB("NEStari.pal")) {
 		//loadRGB("NEStari.pal");                		//Load RGB color selection table. This needs to be done before loading/change palette
 		loadPalette("palette_0.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-		//loadPattern("moon_force.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+		loadPattern("moon_force.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
 
-		loadPattern("patterns/basefont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+		//loadPattern("patterns/basefont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
 
 		paused = false;   							//Allow core 2 to draw once loaded
 	}
@@ -41,44 +46,33 @@ void setup1() { //-----------------------Core 1 handles the graphics stuff
 
   int tileG = 0;
   
-  for (int y = 0 ; y < 16 ; y++) {  
+  for (int y = 0 ; y < 32 ; y++) {  
   
     for (int x = 0 ; x < 16 ; x++) {  
       drawTile(x, y, tileG++ & 0xFF, y & 0x03);
     } 
      for (int x = 16 ; x < 32 ; x++) {  
-      drawTile(x, y, 'A', 0);
+      drawTile(x, y, ' ', 0);
     }
      
   } 
-  
-  tileG = 0;
-  
-   for (int y = 16 ; y < 32 ; y++) {  
-  
-    for (int x = 0 ; x < 16 ; x++) {  
-      drawTile(x, y, tileG++ & 0xFF, y & 0x03);
-    } 
-     for (int x = 16 ; x < 32 ; x++) {  
-      drawTile(x, y, 'B', 0);
-    }
-     
-  }  
-  
 
   for (int x = 0 ; x < 15 ; x++) {  
-    drawTile(x, 30, 10, 0x03);
+    drawTile(x, 30, 27, 0x03);
   } 
   for (int x = 0 ; x < 15 ; x++) {  
-    drawTile(x, 31, 15, 0x03);
+    drawTile(x, 31, 0, 0x03);
   } 
-  
-  setCoarseYRollover(0, 29);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-  setWinYJump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
-  setWinYJump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
+  clearSprite();
+
+  setCoarseYRollover(0, 32);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+  //setWinYJump(0x80, 13, 30);
+  //setWinYJump(0x80, 14, 31); 
 
   add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);
+
 
 }
 
@@ -135,47 +129,49 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	if (paused == true) {
 		return;
 	}
-
-	if (paused == true) {
-		return;
-	}
 	
 	while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
-		delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
+		delayMicroseconds(1);				//Do nothing (arduino doesn't like empty while()s
 	}
 	//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
 	
-	serviceAudio();
+	//serviceAudio();
 	
 	//Controls, file access, etc...
 	
 	while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
 		delayMicroseconds(1);
 	}
-
+	// while(isDMAbusy(0) == true) {			//After Core1 clears the frameDrawing flag the final DMA will likely still be processing, so wait for that to end as well (probably not needed as the buffer will already have been built)
+		// delayMicroseconds(1);
+	// }
+	
 	//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 
 	//gpio_put(14, 1);
 
 	setSpriteWindow(0, 0, 119, 119); //Set window in which sprites can appear (lower 2 rows off-limits because status bar)
 
-	drawSprite(0, 0, 0, 0, 15, 7, 3);
+	drawSprite(xPos >> 2, xPos, 0, 0, 8, 8, 0);
 
 	if (dir == 0) {
-		if (++yPos == 239) {
+		if (++yPos == 100) {
 		  dir = 1;
 		}
 	}
 	else{
-		if (--yPos == 0) {
+		if (--yPos == 16) {
 		  dir = 0;
 		}
 	}
 
-	setWindow(xPos, yPos);			//Set scroll window
+	setWindow(xPos, 0);
 
-	setWindowSlice(30, 0); 			//Last 2 rows set no scroll
-	setWindowSlice(31, 0); 
+	// setWindowSlice(0, 0); 
+	// setWindowSlice(1, 0); 
+
+	// setWindowSlice(30, 0); 
+	// setWindowSlice(31, 0); 
 
 	if (button(left_but)) {
 		xPos--;
@@ -191,20 +187,24 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 		}		
 	}
 
-	if (button(A_but)) {
-		playAudio("audio/getread.wav");
-	}
+	// if (button(A_but)) {
+		// playAudio("audio/getread.wav");
+	// }
 	
 	
-	if (button(B_but)) {
-		playAudio("audio/back.wav");
-	}	
+	// if (button(B_but)) {
+		// playAudio("audio/back.wav");
+	// }	
 	
+	// if (button(C_but)) {
+		// playAudio("audio/back2.wav");
+	// }	
+	
+	// xPos += 1;
+	// if (xPos > 255) {
+		// xPos -= 256;
+	// }
+
 	//gpio_put(14, 0);
-
-}
-
-bool timer_isr(struct repeating_timer *t) {				//Every 33ms, set the flag that it's time to draw a new frame (it's possible system might miss one but that's OK)
-	nextFrameFlag = true;
-	return true;
+	
 }

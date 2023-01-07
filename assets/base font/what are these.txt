@@ -1,0 +1,3 @@
+PSD - base creation file
+BMP - flattened version of the PSD file, exported as index, 256 colors, Microsoft Windows palette
+NES - after loading the BMP into YY-CHR, YY-CHR exports a NES file of the pattern table

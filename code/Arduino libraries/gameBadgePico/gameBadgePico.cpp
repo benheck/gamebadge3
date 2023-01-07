@@ -78,7 +78,7 @@ const struct st7789_config lcd_config = {
 
 void gamebadge3init() {				//Instantiate class and set stuff up
 
-	set_sys_clock_khz(125000, true); 
+	//set_sys_clock_khz(125000, true); 
 
 	flash.begin();
 
@@ -371,7 +371,7 @@ void setWindowSlice(int whichRow, uint8_t x) {
 void setCoarseYRollover(int topRow, int bottomRow) {		//Sets at which row the nametable resets back to the top. If using bottom 2 rows as a status display
 	
 	winYreset = topRow;
-	winYrollover = bottomRow - 1;	
+	winYrollover = bottomRow;	
 	
 }
 
@@ -475,7 +475,7 @@ void sendFrame() {
 				fineYsubCount = 0;		
 				if (++fineYpointer == 8) {						//Did we pass a character edge with the fine Y scroll?
 					fineYpointer = 0;							//Reset scroll and advance character
-					if (++coarseY == winYrollover) {
+					if (++coarseY > winYrollover) {
 						coarseY = winYreset;
 					}				
 				}					
@@ -710,6 +710,9 @@ static void dma_handler_buffer1() {
     dma_hw->ints0 = (1u << 2);
     
 }
+
+
+
 
 //Callbacks for the USB Mass Storage Device-----------------------------------------------
 int32_t msc_read_cb (uint32_t lba, void* buffer, uint32_t bufsize) {
