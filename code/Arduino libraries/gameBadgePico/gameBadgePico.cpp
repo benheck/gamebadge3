@@ -39,13 +39,17 @@ static uint16_t spriteBuffer[14400];
 uint16_t paletteRGB[32];				//Stores the 32 colors as RGB values, pulled from nesPaletteRGBtable
 uint16_t nesPaletteRGBtable[64];		//Stores the current NES palette in 16 bit RGB format
 
+uint16_t baseASCII = 32;				//Stores what tile in the pattern table is the start of printable ASCII (space, !, ", etc...) User can change the starting position to put ASCII whereever they want in pattern table, but this is the default
+uint8_t textWrapEdges[2] = {0, 14};		//Sets a left and right edge where text wraps in the tilemap. Use can change this, default is left side of scroll, one screen wide
+bool textWordWrap = true;				//Is spacing word-wrap enabled (fancy!)
+
 uint8_t winX[32];
 uint8_t winXfine[32];
 uint8_t winY = 0;
 uint8_t winYfine = 0;
 uint8_t winYJumpList[16];				//One entry per screen row. If flag set, winY coarse jumps to nametable row specified and yfinescroll is reset to 0
 uint8_t winYreset = 0; 					//What coarse Y rollovers to in nametable when it reaches winYrollover
-uint8_t winYrollover = 32;				//If coarse window Y = this, reset to winYreset. Use this drawing status bars 
+uint8_t winYrollover = 31;				//If coarse window Y exceeds this, reset to winYreset. Use this drawing status bars or creating vertical margins for word wrap
 int xLeft = -1;							//Sprite window limits. Use this to prevent sprites from drawing over status bar (reduce yBottom by 12)
 int xRight = 120;
 int yTop = -1;
@@ -65,6 +69,10 @@ bool endAudioBuffer0flag = false;
 bool endAudioBuffer1flag = false;
 int audio_pin_slice;
 
+int indexToGPIO[9] = {6, 8, 7, 9, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
+bool debounce[9] = {false, false, false, false, true, true, true, true, true};		//Index of which buttons have debounce (button must open before it can re-trigger)
+uint8_t debounceStart[9] = {0, 0, 0, 0, 5, 5, 1, 1, 1};								//If debounce, how many frames must button be open before it can re-trigger.
+uint8_t debounceTimer[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};    							//The debounceStart time is copied here, and debounceTimer is what's decrimented
 
 const struct st7789_config lcd_config = {
     .spi      = PICO_DEFAULT_SPI_INSTANCE,
@@ -77,8 +85,6 @@ const struct st7789_config lcd_config = {
 };
 
 void gamebadge3init() {				//Instantiate class and set stuff up
-
-	//set_sys_clock_khz(125000, true); 
 
 	flash.begin();
 
@@ -118,17 +124,13 @@ void gamebadge3init() {				//Instantiate class and set stuff up
     pwm_init(audio_pin_slice, &config, true);
 
     pwm_set_gpio_level(10, 0);
-	
-	setGPIObutton(C_but);
-	setGPIObutton(B_but);	
-	setGPIObutton(A_but);	
-	setGPIObutton(select_but);	
-	setGPIObutton(start_but);
-	setGPIObutton(up_but);	
-	setGPIObutton(down_but);	
-	setGPIObutton(left_but);	
-	setGPIObutton(right_but);
-	 
+
+	for (int x = 0 ; x < 9 ; x++) {				//Setup the 9 GPIO used for controls
+		setGPIObutton(indexToGPIO[x]);									//Init each pin using the index mapping
+		setButtonDebounce(x, debounce[x], debounceStart[x]);			//Pass the default values back into themselves. User can change these later on
+		//For instance menus, you'll want to set a debounce for the d-pad so it's one click per action. Then disable d-pad debounce when game starts	
+	}
+
 	//programOffset = pio_add_program(pio, &audio_program);
 	//audio_program_init(pio, 0, programOffset, 10);
 		
@@ -140,13 +142,48 @@ void setGPIObutton(int which) {
 	gpio_pull_up(which);			
 }
 
+void setButtonDebounce(int which, bool useDebounce, uint8_t frames) {	
+
+	debounce[which] = useDebounce;
+	
+	if (useDebounce == true && frames < 1) {			//If debounce you must have at minimum 1 frame of debounce time (at least one frame off before can retrigger)
+		frames = 1;
+	}
+
+	debounceStart[which] = frames;	
+}
+
 bool button(int which) {				//A, B, C, select, start, up, down, left, right
 
-	if (gpio_get(which) == 0) {
-		return true;
+	if (debounce[which] == true) {								//Switch has debounce?
+		if (debounceTimer[which] == 0) {						//Has timer cleared?
+			if (gpio_get(indexToGPIO[which]) == 0) {			//OK now you can check for a new button press
+				debounceTimer[which] = debounceStart[which];		//Yes? Set new timer
+				return true;										//and return button pressed
+			}				
+		}
 	}
-	
+	else {
+		if (gpio_get(indexToGPIO[which]) == 0) {		//Button pressed? That's all we care about
+			return true;
+		}		
+	}
+
 	return false;
+	
+}
+
+void serviceDebounce() {				//Must be called every frame, even if paused (because the buttons need to work to unpause!)
+
+	for (int x = 0 ; x < 9 ; x++) {				//Scan all buttons
+		if (debounce[x] == true) {				//Button uses debounce?
+			if (debounceTimer[x] > 0) {			//Is the value above 0? That means button was pressed in the past
+				if (gpio_get(indexToGPIO[x]) == 1) {			//Has button opened?
+					debounceTimer[x]--;			//If so, decrement debounce while it's open. When debounce reaches 0, it can be re-triggered under button funtion
+				}		
+			}
+		}		
+	}
 	
 }
 
@@ -204,10 +241,134 @@ void loadPattern(const char* path, uint16_t start, uint16_t length) {	//Loads a 
   
 }
 
-void drawTile(int xPos, int yPos, char whatTile, char whatPalette) {
 
-		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//The simple part		
+//In tilemap position XY, draw the tile at index "whattile" from the pattern table using whatPalette (0-7)
+void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette) {
+
+		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
 }
+
+//In tilemap position XY, draw the tile at position tileX to the right, tileY down, from the pattern table using whatPalette (0-7)
+void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette) {
+
+		uint16_t whatTile = (tileY * 16) + tileX;						//Do this math for the user :)
+
+		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
+}
+
+//By default draw decimal/text assumes printable ASCII starts at pattern tile 32 (space) Use this function if you put ASCII elsewhere in your pattern table
+void setASCIIbase(uint16_t whatBase) {
+	
+	baseASCII = whatBase;
+
+}
+
+//If drawing text with doWrap = true, this sets the left and right margins in the name table
+void setTextMargins(int left, int right) {
+	
+	textWrapEdges[0] = left;
+	textWrapEdges[1] = right;
+	
+	//If you want stuff to wrap within a static screen, you'd use 0, 14 (the default)
+	//If you want to fill the name table with text, such as frame a webpage, you could set 0, 31 and then scroll left and right to read all text
+	//Text carriage returns wrap within the same confines defined by setCoarseYRollover(int topRow, int bottomRow);
+	//Text that goes past bottomRow will wrap to topRow
+	
+}
+
+//Draws a string of horizontal text at position x,y in the tilemap
+void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false) {
+
+	if (doWrap) {
+
+		bool cr = false;								//Set TRUE to perform a carriage return (several things can cause this hence the flag)
+
+		while(*text) {
+			if (*text == ' ') {							//If current character is a space, then we need to do special checks
+				//Serial.print("Space found. ");
+				if (x == textWrapEdges[0]) {			//No reason to draw spaces on left margin
+					//Serial.println("Left margin skip");
+					text++;								//Advance pointer but not X
+				}
+				else {												//Not on left margin?
+					if (x == textWrapEdges[1]) {					//Does this space land on the right margin?
+						//Serial.println("On right margin. Draw space and do CR");
+						nameTable[y][x] = *text++;					//Draw the space...
+						cr = true;									//and set carriage return for next char
+					}
+					else {											//OK so there is at least 1 character of space after this space " "
+						//Serial.print("Next word='");
+						int charCount = 0;								//Let's count the characters in the next word
+						nameTable[y][x++] = *text;					    //Draw the space and advance x
+
+						while(*text == 32) {							//Move text past the space and keep going until we find a non-space
+							*text++;
+						}
+						
+						if (*text == 0) {								//Ok we're past all the damn spaces. Did we hit end of string because some asshole typed "hello world!   " ?
+							return;										//Fuck it we're done!
+						}
+			
+						while(*text != 32 && *text != 0) {				//Look for the next space or end of string
+							//Serial.write(*text);						//Debug
+							charCount++;								//Count how many chars we find in front of next space or end
+							text += 1;									//Advance the pointer
+						}
+						
+						//Serial.print("' length = ");
+						//Serial.print(charCount, DEC);
+						//Serial.print(" WRAP? ");
+						text -= charCount;								//Rollback pointer to start of word because we still need to draw it
+						if (charCount > ((textWrapEdges[1] + 1) - x)) {		//Check if enough characters to draw this word (offset +1 because we need count not index)
+							//Serial.println("YES");						//Have to make sure stuff like " to" or " I" renders
+							cr = true;
+						}
+						else {
+							//Serial.println("NO");
+						}					
+					}	
+				}
+			}
+			else {
+				if (x == textWrapEdges[1]) {		//Will this character land on the right margin?
+					text++;							//Check next character
+					
+					if (*text == ' ') {				//Single character with a space after? "a ", " I"...
+						text--;						//Backup pointer
+						nameTable[y][x] = *text++;	//and print it, advancing the pointer again. Next line will see the space and skip it since beginning of line
+					}
+					else {
+						nameTable[y][x] = '-';		//Draw a hyphen
+						text--;						//Backup pointer so the character that wasn't ' ' will print on next line
+					}
+					cr = true;
+				}
+				else {
+					nameTable[y][x++] = *text++;	//Standard draw
+				}			
+			}		
+			
+			if (cr == true) {						//Flag to do carriage return?
+				//Serial.println("Carriage Return");
+				cr = false;							//Clear flag
+				x = textWrapEdges[0];				//Jump to left margin
+				if (++y > winYrollover) {			//Advance Y row and rollover if it goes past bottom limit
+					y = winYreset;
+				}
+			}	
+			//Serial.print(x, DEC);
+			//Serial.print(" ");
+			//Serial.println(y, DEC);
+		}
+	}
+	else {
+		while(*text) {
+			nameTable[y][x++] = *text++;			//Just draw the characters from left to write
+		}
+	}
+
+}
+
 
 void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette) {
 

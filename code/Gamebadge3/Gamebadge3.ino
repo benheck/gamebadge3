@@ -1,5 +1,5 @@
 #include <gameBadgePico.h>
-
+//Your defines here------------------------------------
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
@@ -12,8 +12,6 @@ bool frameDrawing = false;					//Set TRUE when Core1 is drawing the display. Cor
 int xPos = 0;
 int yPos = 0;
 int dir = 0;
-
-int debounce = 0;
 
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -72,11 +70,11 @@ void setup1() { //-----------------------Core 1 handles the graphics stuff
   for (int x = 0 ; x < 15 ; x++) {  
     drawTile(x, 31, 15, 0x03);
   } 
-  
-  setCoarseYRollover(0, 29);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+ 
+  setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-  setWinYJump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
-  setWinYJump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
+  //setWinYJump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
+  //setWinYJump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
 
   add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);
 
@@ -88,24 +86,19 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		nextFrameFlag = false;			//Clear that flag		
 		drawFrameFlag = true;			//and set the flag that tells Core1 to draw the LCD
 		gameFrame();					//Now do our game logic in Core0
+		serviceDebounce();				//Debounce buttons
 	}
 
 	if (paused == false) {   
 		if (button(start_but)) {      //Button pressed?
 		  paused = true;
 		  Serial.println("PAUSED");
-		  while(button(start_but)) {
-			delay(5);
-		  }   
 		}      
 	}
 	else {
 		if (button(start_but)) {      //Button pressed?
 		  paused = false;
 		  Serial.println("UNPAUSED");
-		  while(button(start_but)) {
-			delay(5);
-		  }   
 		}    
 	}
 
@@ -157,25 +150,25 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 
 	//gpio_put(14, 1);
 
-	setSpriteWindow(0, 0, 119, 119); //Set window in which sprites can appear (lower 2 rows off-limits because status bar)
+	//setSpriteWindow(0, 0, 119, 119); //Set window in which sprites can appear (lower 2 rows off-limits because status bar)
 
-	drawSprite(0, 0, 0, 0, 15, 7, 3);
+	//drawSprite(0, 0, 0, 0, 15, 7, 3);
 
-	if (dir == 0) {
-		if (++yPos == 239) {
-		  dir = 1;
-		}
-	}
-	else{
-		if (--yPos == 0) {
-		  dir = 0;
-		}
-	}
+	// if (dir == 0) {
+		// if (++yPos == 239) {
+		  // dir = 1;
+		// }
+	// }
+	// else{
+		// if (--yPos == 0) {
+		  // dir = 0;
+		// }
+	// }
 
 	setWindow(xPos, yPos);			//Set scroll window
 
-	setWindowSlice(30, 0); 			//Last 2 rows set no scroll
-	setWindowSlice(31, 0); 
+	//setWindowSlice(30, 0); 			//Last 2 rows set no scroll
+	//setWindowSlice(31, 0); 
 
 	if (button(left_but)) {
 		xPos--;
@@ -190,15 +183,45 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 			xPos -= 256;
 		}		
 	}
+	
+	if (button(up_but)) {
+		if (yPos > 0) {
+			yPos--;
+		}	
+	}
+	
+	if (button(down_but)) {
+		if (yPos < 120) {
+			yPos++;
+		}	
+	}	
+	
+	if (button(select_but)) {
+		   for (int y = 0 ; y < 32 ; y++) {  
+	  
+		 for (int x = 0 ; x < 32 ; x++) {  
+		  drawTile(x, y, ' ', 0);
+		}
+		 
+	  } 	
+	}
 
 	if (button(A_but)) {
-		playAudio("audio/getread.wav");
+		//playAudio("audio/getread.wav");
+		drawText("0123456789ABC E brute?", 0, 0, true);
 	}
 	
 	
 	if (button(B_but)) {
-		playAudio("audio/back.wav");
+		//playAudio("audio/back.wav");
+		drawText("supercalifraguliosdosis", 0, 14, true);
 	}	
+	
+	if (button(C_but)) {
+		//playAudio("audio/back.wav");
+		drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
+	}	
+	
 	
 	//gpio_put(14, 0);
 
