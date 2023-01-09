@@ -207,7 +207,7 @@ bool loadRGB(const char* path) {
 
 void loadPalette(const char* path) {
 
-  file.open("palette_0.dat", O_RDONLY);
+  file.open(path, O_RDONLY);
 
   for (int x = 0 ; x < 32 ; x++) {
     updatePalette(x, file.read()); 
