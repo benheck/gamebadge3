@@ -39,6 +39,8 @@ static uint16_t spriteBuffer[14400];
 uint16_t paletteRGB[32];				//Stores the 32 colors as RGB values, pulled from nesPaletteRGBtable
 uint16_t nesPaletteRGBtable[64];		//Stores the current NES palette in 16 bit RGB format
 
+#define spriteAlphaColor 	0x0001		//The 16-bit LCD RGB color that is used for sprite transparency (make sure nothing in the palette matches it)
+
 uint16_t baseASCII = 32;				//Stores what tile in the pattern table is the start of printable ASCII (space, !, ", etc...) User can change the starting position to put ASCII whereever they want in pattern table, but this is the default
 uint8_t textWrapEdges[2] = {0, 14};		//Sets a left and right edge where text wraps in the tilemap. Use can change this, default is left side of scroll, one screen wide
 bool textWordWrap = true;				//Is spacing word-wrap enabled (fancy!)
@@ -69,7 +71,13 @@ bool endAudioBuffer0flag = false;
 bool endAudioBuffer1flag = false;
 int audio_pin_slice;
 
-int indexToGPIO[9] = {6, 8, 7, 9, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
+const int notes[] = {
+    261, 277, 293, 311, 329, 349, 369, 391, 415, 440, 466, 493
+};
+
+int indexToGPIO[9] = {7, 11, 9, 13, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
+//int indexToGPIO[9] = {6, 8, 7, 9, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
+
 bool debounce[9] = {false, false, false, false, true, true, true, true, true};		//Index of which buttons have debounce (button must open before it can re-trigger)
 uint8_t debounceStart[9] = {0, 0, 0, 0, 5, 5, 1, 1, 1};								//If debounce, how many frames must button be open before it can re-trigger.
 uint8_t debounceTimer[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};    							//The debounceStart time is copied here, and debounceTimer is what's decrimented
@@ -84,7 +92,7 @@ const struct st7789_config lcd_config = {
     .gpio_bl  = 22
 };
 
-void gamebadge3init() {				//Instantiate class and set stuff up
+void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 
 	flash.begin();
 
@@ -100,30 +108,33 @@ void gamebadge3init() {				//Instantiate class and set stuff up
 		Serial.println("Failed to init files system, flash may need to be formatted");
 	}
 
-	Serial.println("Adafruit TinyUSB Mass Storage External Flash example");
-	Serial.print("JEDEC ID: 0x"); Serial.println(flash.getJEDECID(), HEX);
-	Serial.print("Flash size: "); Serial.print(flash.size() / 1024); Serial.println(" KB");
+	//Serial.println("Adafruit TinyUSB Mass Storage External Flash example");
+	//Serial.print("JEDEC ID: 0x"); Serial.println(flash.getJEDECID(), HEX);
+	//Serial.print("Flash size: "); Serial.print(flash.size() / 1024); Serial.println(" KB");
 
 	st7789_init(&lcd_config, 240, 240);			//Set up LCD for great justice
-
 	st7789_setRotation(1);						//Ribbon cable on left side of display
 	
-	gpio_init(14);
-	gpio_set_dir(14, GPIO_OUT);
-	
-	gpio_init(15);
+	gpio_init(15);								//Pinout for scope timing checks
 	gpio_set_dir(15, GPIO_OUT);
 	gpio_put(15, 0);
 	
-	gpio_set_function(10, GPIO_FUNC_PWM);
-	audio_pin_slice = pwm_gpio_to_slice_num(10);	
+	gpio_set_function(14, GPIO_FUNC_PWM);
+	audio_pin_slice = pwm_gpio_to_slice_num(14);	
 	pwm_config config = pwm_get_default_config();
 	
 	pwm_config_set_clkdiv(&config, 5.5f); 
     pwm_config_set_wrap(&config, 255); 
     pwm_init(audio_pin_slice, &config, true);
 
-    pwm_set_gpio_level(10, 0);
+    gpio_set_function(6, GPIO_FUNC_PWM);
+	gpio_set_function(8, GPIO_FUNC_PWM);
+    gpio_set_function(10, GPIO_FUNC_PWM);
+	gpio_set_function(12, GPIO_FUNC_PWM);
+	gpio_set_function(14, GPIO_FUNC_PWM);
+	
+	pwm_set_gpio_level(14, 128);					//Set PWM base level
+
 
 	for (int x = 0 ; x < 9 ; x++) {				//Setup the 9 GPIO used for controls
 		setGPIObutton(indexToGPIO[x]);									//Init each pin using the index mapping
@@ -131,17 +142,43 @@ void gamebadge3init() {				//Instantiate class and set stuff up
 		//For instance menus, you'll want to set a debounce for the d-pad so it's one click per action. Then disable d-pad debounce when game starts	
 	}
 
-	//programOffset = pio_add_program(pio, &audio_program);
-	//audio_program_init(pio, 0, programOffset, 10);
-		
+	
 }
 
-void setGPIObutton(int which) {
+uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d) {
+
+	uint slice_num = pwm_gpio_to_slice_num(gpioNum);
+	uint chan = pwm_gpio_to_channel(gpioNum);
+
+	 uint32_t clock = 125000000;
+	 uint32_t divider16 = clock / f / 4096 + (clock % (f * 4096) != 0);
+	 
+	 if (divider16 / 16 == 0) {
+		divider16 = 16;
+	 }
+ 
+	 uint32_t wrap = clock * 16 / divider16 / f - 1;
+	 
+	 pwm_set_clkdiv_int_frac(slice_num, divider16 / 16, divider16 & 0xF);
+	 pwm_set_wrap(slice_num, wrap);
+	 pwm_set_chan_level(slice_num, chan, (wrap * d) / 100);
+	 pwm_set_enabled(slice_num, true);
+	
+	// Serial.print(" s-");		
+	// Serial.print(slice_num, DEC);
+	// Serial.print(" c-");
+	// Serial.println(chan, DEC);
+
+	 return wrap;
+}
+
+void setGPIObutton(int which) {		//Used internally to setup button GPIO
 	gpio_init(which);
 	gpio_set_dir(which, GPIO_IN);
 	gpio_pull_up(which);			
 }
 
+//Enables/disables button debounce. If useDebounce = true, button must be released for frames before it can be re-triggered (usually ABC, or D-pad during menus)
 void setButtonDebounce(int which, bool useDebounce, uint8_t frames) {	
 
 	debounce[which] = useDebounce;
@@ -153,6 +190,7 @@ void setButtonDebounce(int which, bool useDebounce, uint8_t frames) {
 	debounceStart[which] = frames;	
 }
 
+//Returns a boolean of the button state, using debounce settings
 bool button(int which) {				//A, B, C, select, start, up, down, left, right
 
 	if (debounce[which] == true) {								//Switch has debounce?
@@ -173,6 +211,7 @@ bool button(int which) {				//A, B, C, select, start, up, down, left, right
 	
 }
 
+//Must be called once per frame to service the button debounce
 void serviceDebounce() {				//Must be called every frame, even if paused (because the buttons need to work to unpause!)
 
 	for (int x = 0 ; x < 9 ; x++) {				//Scan all buttons
@@ -187,16 +226,15 @@ void serviceDebounce() {				//Must be called every frame, even if paused (becaus
 	
 }
 
+//Loads the YY-CHR 64 color palette file (.pal) from file into RAM. This must be called before calling loadPalette as that uses this index to fill tables
 bool loadRGB(const char* path) {
 
 	if (file.open(path, O_RDONLY)) {
 		
-	  for (int x = 0 ; x < 64 ; x++) {
-		updatePaletteRGB(x, file.read(), file.read(), file.read()); 
+	  for (int x = 0 ; x < 64 ; x++) {								//Convert each 3 byte 24-bit RGB value from disk to 16-bit color in RAM that uses same color space as ST7789 LCD
+		updatePaletteRGB(x, file.read(), file.read(), file.read()); //We do as much math up front during loads to save time during frame render (trading RAM for speed)
 	  }
-
-	  file.close();	
-	  
+	  file.close();		  
 	  return true;
 	
 	}
@@ -205,18 +243,53 @@ bool loadRGB(const char* path) {
 
 }
 
+//Loads  the YY-CHR palette data file (.dat) from file into RAM. There are 8 palettes of 4 colors each (sprites use color 0 as transparency, tiles can set 4 unique colors)
 void loadPalette(const char* path) {
+	
+  digitalWrite(LED_BUILTIN, HIGH);
 
-  file.open("palette_0.dat", O_RDONLY);
+  file.open(path, O_RDONLY);
 
   for (int x = 0 ; x < 32 ; x++) {
-    updatePalette(x, file.read()); 
+    updatePalette(x, file.read());							//Use palette.dat file to create an RGB reference for all 32 colors 
   }
 
   file.close();
   
+  digitalWrite(LED_BUILTIN, LOW);
+//This loads 32 byte indexes from disk that point to the table loaded by loadRGB, ie: if palette 0, color 0 (first byte in file) contains a 1, it
+//is referencing the second byte (index[1]) of the nesPaletteRGBtable[] table. 
+
 }
 
+//To save math we copy the RGB values (as a 16-bit number) to the paletteRGB index.
+void updatePalette(int position, char theIndex) {						//Allows game code to update palettes off flash/SD
+	
+
+	paletteRGB[position] = nesPaletteRGBtable[theIndex];
+//Updates the palette table with the 16-bit value stored in the master list of available colors (that were loaded in with loadRGB)
+//You can also use this function for dynamic palette changes, like the Mega Man 2 waterfall	
+}
+
+//Converts a 24-bit RGB value (such as RGB file) to the 16-bit color of the ST7789 LCD
+void updatePaletteRGB(int position, char r, char g, char b) {						//Allows game code to update palettes off flash/SD
+
+	uint16_t red = r;
+	uint16_t green = g;
+	uint16_t blue = b;
+
+	red &= 0xF8;			//Lob off bottom 3 bits
+	red <<= 8;				//Pack to MSB
+	green &= 0xFC;			//Lob off bottom 2 bits (because evolution)
+	green <<= 3;			//Pack to middle
+	blue &= 0xF8;			//Lobb off bottom 3 bits
+	blue >>= 3;				//Pack to LSB
+	
+	nesPaletteRGBtable[position] = red | green | blue;				//Put the 16-bit color value in the palette RGB index (max 64 colors)
+	
+}
+
+//Loads a YY-CHR .nes file (pattern table data, aka graphics) from disk and stores it in Pico RAM
 void loadPattern(const char* path, uint16_t start, uint16_t length) {	//Loads a pattern file into memory. Use start & length to only change part of the pattern, like of like bank switching!
 
   unsigned char lowBit[8];
@@ -234,36 +307,56 @@ void loadPattern(const char* path, uint16_t start, uint16_t length) {	//Loads a 
     convertBitplanePattern(numChar << 3, lowBit, highBit);		//Pass array points to function that will convert to chunky pixels
     
   }
-
+  //NES pattern tables used planer (bitplane) graphics. Each pixel was represented by 2 bits (thus 4 colors) but the bits were not next to each other in memory
+  //They were stored at different offsets (planer) This was used by a lot of computers in the 80's such as the Atari ST and Amiga. A 4 bit (16 color) image was
+  //stored in memory as (4) separate 1 bit patterns and combined by video hardware https://en.wikipedia.org/wiki/Planar_(computer_graphics)
+  //Later systems such as the Master System/Genesis used "chunky" pixels in which multiple bits used to define color were stored next to each other in the same byte
+  
+  //By default gamebadge has 8192 words of pattern data (chunky pixel) which equals (4) 16x16 tile patterns that can be stored in memory at once (twice that of the NES)
+  //Unlike the NES you can either any tile for either spites or tiles
+  
   file.close();
 
   digitalWrite(LED_BUILTIN, LOW);
   
 }
 
-
-//In tilemap position XY, draw the tile at index "whattile" from the pattern table using whatPalette (0-7)
+//In tilemap position X/Y, draw the tile at index "whattile" from the pattern table using whatPalette (0-7)
 void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette) {
 
 		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
 }
 
-//In tilemap position XY, draw the tile at position tileX to the right, tileY down, from the pattern table using whatPalette (0-7)
-void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette) {
+//In tilemap position X/Y, draw the tile at position tileX to the right, tileY down, from the pattern table using whatPalette (0-7)
+void drawTile(int tileX, int tileY, uint16_t patternX, uint16_t patternY, char whatPalette) {
 
-		uint16_t whatTile = (tileY * 16) + tileX;						//Do this math for the user :)
+		uint16_t whatTile = (patternY * 16) + patternX;						//Do this math for the user :)
 
-		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
+		nameTable[tileY][tileX] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
 }
 
-//By default draw decimal/text assumes printable ASCII starts at pattern tile 32 (space) Use this function if you put ASCII elsewhere in your pattern table
+//Used to fill or clear a large amount of tiles (should do on boot in case garbage in RAM though in theory arrays should boot at 0's)
+void fillTiles(int startX, int startY, int endX, int endY, uint16_t whatTile, char whatPalette) {
+	
+	endX++;
+	endY++;
+	
+	for (int y = startY ; y < endY ; y++) {		
+		for (int x = startX ; x < endX ; x++) {
+			drawTile(x, y, whatTile, whatPalette);
+		}		
+	}
+
+}
+
+//By default drawing decimal/text assumes printable ASCII starts at pattern tile 32 (space) Use this function if you put ASCII elsewhere in your pattern table
 void setASCIIbase(uint16_t whatBase) {
 	
 	baseASCII = whatBase;
 
 }
 
-//If drawing text with doWrap = true, this sets the left and right margins in the name table
+//If drawing text with doWrap = true, this sets the left and right margins in the name table (min 0, max 31)
 void setTextMargins(int left, int right) {
 	
 	textWrapEdges[0] = left;
@@ -276,7 +369,7 @@ void setTextMargins(int left, int right) {
 	
 }
 
-//Draws a string of horizontal text at position x,y in the tilemap
+//Draws a string of horizontal text at position x,y in the tilemap and if doWrap=true follows word wrap rules, else just draws from left to right
 void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false) {
 
 	if (doWrap) {
@@ -369,77 +462,127 @@ void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false) {
 
 }
 
+//Draws a sprite at xPos/yPos using a range of tiles from the pattern table, starting at tileX/Y, ending at xWide/yHigh, using whichpalette and flipped V/H if true 
+void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette, bool hFlip, bool vFlip) {
 
-void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette) {
+	int tileYstart = tileY;
+	int tileYend = tileY + yHigh;
+	int tileYdir = 1;
 
-	for (int yTiles = tileY ; yTiles < (tileY + yHigh) ; yTiles++) {	
+	if (vFlip) {
+		tileYstart = tileY + yHigh;
+		tileYend = tileY;
+		tileYdir = -1;		
+	}
+
+	for (int yTiles = tileYstart ; yTiles != tileYend ; yTiles += tileYdir) {	
 
 		int xPosTemp = xPos;
-	
-		for (int xTiles = tileX ; xTiles < (tileX + xWide) ; xTiles++) {
-			drawSprite(xPosTemp, yPos, xTiles, yTiles, whichPalette);	
-			xPosTemp += 8;
-		}		
+
+		if (hFlip) {
+			for (int xTiles = (tileX + (xWide - 1)) ; xTiles > (tileX - 1) ; xTiles--) {
+				drawSprite(xPosTemp, yPos, xTiles, yTiles, whichPalette, true, vFlip);			//Use other function to draw a series of 8x8 sprites
+				xPosTemp += 8;
+			}				
+		}
+		else {
+			for (int xTiles = tileX ; xTiles < (tileX + xWide) ; xTiles++) {
+				drawSprite(xPosTemp, yPos, xTiles, yTiles, whichPalette, false, vFlip);			//Use other function to draw a series of 8x8 sprites	
+				xPosTemp += 8;
+			}				
+		}
+
 		yPos += 8;	
 		
 	}
 	
 }
 
-void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette) {
-	
-	//gpio_put(13, 1);
+//Draws a single 8x8 sprite at xPos/yPos using a tile from the pattern table at tileX/Y, using whichpalette and flipped V/H if true 
+void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette, bool hFlip, bool vFlip) {
 
-	tileY += 16;
+	gpio_put(15, 1);
 
 	tileX <<= 3;
 	tileY <<= 7;
 	
-	uint16_t *sp = &spriteBuffer[(yPos * 120) + xPos];    				  //Use pointer so less math later on
-
-	uint16_t *tilePointer = &patternTable[tileX + tileY];
-
-	for (int yPixel = yPos ; yPixel < (yPos + 8) ; yPixel++) {
-
-		uint16_t temp = *tilePointer;						//Get pointer for sprite tile
-
-		for (int xPixel = xPos ; xPixel < (xPos + 8) ; xPixel++) {
-			
-			uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
-			
-			//For a sprite pixel to be drawn, it must be within the current window, not a 0 index color, and not over an existing sprite pixel
-			if (xPixel > xLeft && xPixel < xRight && yPixel > yTop && yPixel < yBottom && twoBits != 0 && *sp == 0xF81f) {
-				*sp = paletteRGB[(whichPalette << 2) + twoBits];
-			}
-			sp++;
-			temp <<= 2;										//Shift for next 2 bit color pair
-
-		}
-		
-		tilePointer++;
-		
-		sp += (120 - 8);
-		
-	}
+	int lineYdir = 1;			//Normal sprites
+	int vFlipOffset = 0;
 	
-	//gpio_put(13, 0);
+	if (vFlip) {				//Vertical flip
+		lineYdir = -1;
+		vFlipOffset = 7;
+	}
+		
+	if (hFlip) {
+		uint16_t *sp = &spriteBuffer[(yPos * 120) + xPos];    				  //Use pointer so less math later on
+		uint16_t *tilePointer = &patternTable[tileX + tileY + vFlipOffset];
+
+		for (int yPixel = yPos ; yPixel < (yPos + 8) ; yPixel++) {
+
+			uint16_t temp = *tilePointer;						//Get pointer for sprite tile
+
+			for (int xPixel = xPos ; xPixel < (xPos + 8) ; xPixel++) {
+				
+				uint8_t twoBits = temp & 0x03;					//Get lowest 2 bits
+				
+				//For a sprite pixel to be drawn, it must be within the current window, not a 0 index color, and not over an existing sprite pixel
+				if (xPixel > xLeft && xPixel < xRight && yPixel > yTop && yPixel < yBottom && twoBits != 0 && *sp == spriteAlphaColor) {
+					*sp = paletteRGB[(whichPalette << 2) + twoBits];
+				}
+				sp++;
+				temp >>= 2;										//Shift for next 2 bit color pair
+
+			}
+			
+			tilePointer += lineYdir;			
+			sp += (120 - 8);
+			
+		}		
+	}
+	else {
+		uint16_t *sp = &spriteBuffer[(yPos * 120) + xPos];    				  //Use pointer so less math later on
+
+		uint16_t *tilePointer = &patternTable[tileX + tileY + vFlipOffset];
+
+		for (int yPixel = yPos ; yPixel < (yPos + 8) ; yPixel++) {
+
+			uint16_t temp = *tilePointer;										//Get pointer for sprite tile
+
+			for (int xPixel = xPos ; xPixel < (xPos + 8) ; xPixel++) {
+				
+				uint8_t twoBits = temp >> 14;									//Smash this down into 2 lowest bits
+				
+				//For a sprite pixel to be drawn, it must be within the current window, not a 0 index color, and not over an existing sprite pixel
+				if (xPixel > xLeft && xPixel < xRight && yPixel > yTop && yPixel < yBottom && twoBits != 0 && *sp == spriteAlphaColor) {
+					*sp = paletteRGB[(whichPalette << 2) + twoBits];
+				}
+				sp++;
+				temp <<= 2;										//Shift for next 2 bit color pair
+
+			}
+			
+			tilePointer += lineYdir;			
+			sp += (120 - 8);
+			
+		}		
+	}
+
+	gpio_put(15, 0);
 
 }	
 
+//Wipes entire sprite buffer with the transparent color
 void clearSprite() {
 	
 	for (int x = 0 ; x < 14400 ; x++) {   
-		spriteBuffer[x] = 0xF81F;
+		spriteBuffer[x] = spriteAlphaColor; //spriteAlphaColor;
 	} 
-	
+//The sprite buffer is cleared as each frame is rendered so user doesn't need to run this every frame, it's best for setup/boot purposes
+//Once frameDrawing == false you can be assured the sprite buffer has been cleared during render and is ready to be filled with the next frame of data	
 }
 
-void updatePattern(uint16_t position, char lowByte, char highByte) {			//Allows game code to load patterns off flash/SD
-	
-	patternTable[position] = lowByte | (highByte << 8);	
-	
-}
-
+//Converts the 2 bitplane YY-CHR NES graphics to chunky pixels in Pico memory (done on pattern load)
 void convertBitplanePattern(uint16_t position, unsigned char *lowBitP, unsigned char *highBitP) {
 	
 
@@ -471,44 +614,66 @@ void convertBitplanePattern(uint16_t position, unsigned char *lowBitP, unsigned 
 	
 }
 	
-void updatePalette(int position, char theIndex) {						//Allows game code to update palettes off flash/SD
+//Sets display rows to special functions (such as statis status bars or other effects)
+void setWinYjump(int jumpFrom, int nextRow) {
+
+	winYJumpList[jumpFrom] = 0x80 | nextRow;	
 	
-	paletteRGB[position] = nesPaletteRGBtable[theIndex];
+	//Gamebadge always draws 15 rows (top to bottom) of tile graphics (120 pixels wide x 8 tall)
+	//This function allows you to set "freeze" functions on these rows. You can use this to create static (non-moving) status bars like Super Mario or Castlevania
+	//The row values set here refer to the rows as displayed on the LCD, not whatever portion of the tile map is being shown per setWindow
+	//This allows you to freeze rows, but still perform vertical and horizontal scrolls above or below it
+	
+	//Example usage:
+	//Setup:
+	//CHECK THIS BJH
+	//setWinYjump(0, 1);			//Sets row 0 as static, jump to row 1
+	//seyWinYjump(1, 2);			//Also sets row 1 as static, jump to row 2
+	//setCoarseYRollover(2, 31);	//Tells the tilemap to scroll between rows 2 and 31 (excluding the top 2)
+	
+	//Per game frame:
+	//setWindow(n, nn);				//Set overall scroll
+	//setWindowSlice(0, 0);			//Freeze scroll of row 0
+	//setWindowSlice(1, 0);			//Freeze scroll of row 1
+	
+	//Data written to the first upper left 2 rows (15 tiles wide) will be static, the rest of the display will scroll
+
+	//To make a status bar at the bottom of the screen it's mostly the same but a little different:
+	
+	//Setup:
+	//setWinYjump(13, 30);			//Sets row 13 as static, jump to row 30
+	//seyWinYjump(14, 31);			//Sets row 14 as static, jump to row 31
+	//setCoarseYRollover(0, 29);	//Tells the tilemap to scroll between rows 0 and 29 (excluding the bottom 2)
+
+	//Per game frame:
+	//setWindow(n, nn);				//Set overall scroll
+	//setWindowSlice(30, 0);			//Freeze scroll of row 30
+	//setWindowSlice(31, 0);			//Freeze scroll of row 31
+
+	//In this example you'd draw your status bar at the bottom of the tilemap (rows 30 and 31) and these commands tell the display to
+	//jump there on (rendered) rows 13 and 14. All tilemap rows below 30 will scroll normally
 	
 }
 
-void updatePaletteRGB(int position, char r, char g, char b) {						//Allows game code to update palettes off flash/SD
+//Clears the row jumps set by setWinYjump
+void clearWinYjump(int whichRow) {
 
-	uint16_t red = r;
-	uint16_t green = g;
-	uint16_t blue = b;
-
-	red &= 0xF8;			//Lob off bottom 3 bits
-	red <<= 8;				//Pack to MSB
-	green &= 0xFC;			//Lob off bottom 2 bits (because evolution)
-	green <<= 3;			//Pack to middle
-	blue &= 0xF8;			//Lobb off bottom 3 bits
-	blue >>= 3;				//Pack to LSB
-	
-	nesPaletteRGBtable[position] = red | green | blue;
+	winYJumpList[whichRow] = 0;	
 	
 }
 
-void setWinYJump(int flag, int jumpFrom, int nextRow) {
-
-	winYJumpList[jumpFrom] = flag | nextRow;	
-	
-}
-
-void setSpriteWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {	//Sets window in which sprites can be drawn, 0, 119, 0, 119 = full screen
+//Sets LCD window in which sprites can be drawn, 0, 119, 0, 119 = full screen (boot default)
+void setSpriteWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {	
 
 	xLeft = x0 - 1;
 	xRight = x1 + 1;
 	yTop = y0 - 1;
 	yBottom = y1 + 1;	
+//Use this to prevent sprites from drawing over static status bars (0, 119, 0, 103 to exclude the bottom 2 rows)
 
 }	
 
+//Sets the universal fine scroll window over the name table. Must be from 0-239, 0-239, when exceeding 239 you should "roll over" back to 0
 void setWindow(uint8_t x, uint8_t y) {
 
 	for (int g = 0 ; g < 32 ; g++) {
@@ -522,21 +687,35 @@ void setWindow(uint8_t x, uint8_t y) {
 
 }
 
+//Allows each row (8 pixels high) of the tile map to be fine horizontally scrolled at different rates (like fake parallax scrolling)
 void setWindowSlice(int whichRow, uint8_t x) {
 	
 		winX[whichRow] = x >> 3;
 		winXfine[whichRow] = x & 0x07;	
+		
+//whichRow is 0-31, x is 0-239 like setWindow
+//Use setWindow to set main window, then use this to control individual rows. For status displays, set their scroll to a fixed 0 so they don't move with rest of screen
 	
 }
 
+//Sets which tile map rows are the bounderies for vertical scrolling rollover. 0-31 use whole nametable, 2-31, use top 2 rows as a static display, 0-29, use bottom 2 rows of a static display (see setWinYjump)
 void setCoarseYRollover(int topRow, int bottomRow) {		//Sets at which row the nametable resets back to the top. If using bottom 2 rows as a status display
 	
 	winYreset = topRow;
 	winYrollover = bottomRow;	
+
+//When you scroll far enough down in the nametable where there isn't enough data to draw, it will "roll over" back to the top (just like the NES)
+//This is why once you've scrolled 239 pixels left or right up or down you should reset your window back to 0
+//But until you reach that limit, gamebadge will display the "rolled over" pixels. In the case of vertical scroll, which this function
+//controls, once row 31 is drawn any additional rows on the display revert back to row 0 (rollover)
+//By default the rollover uses the entire vertical display (32 rows) but if you're using static rows for status bars (in conjunction with setWinYjump) you'll want
+//to use this function to change the rollover to only include valid background data (not status bars)
+
 	
 }
 
-void sendFrame() {
+//Renders tiles and sprites and DMA's the data to the ST7789 LCD. Takes about 15ms. Core0 can do other stuff while this happens, as long as it doesn't access video memory (else tearing can occur)
+void sendFrame() {								//This is executed by Core1. Core0 can do other stuff during this time
 	
 	st7789_setAddressWindow(0, 0, 240, 240);	//Set entire LCD for drawing
 	st7789_ramwr();                       		//Switch to RAM writing mode dawg
@@ -555,7 +734,7 @@ void sendFrame() {
 	for (int row = 0 ; row < 15 ; row++) {				  //15 rows of 8x8 fat pixels (16x16)
 
 		uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
-		gpio_put(14, 1);											//Scope testing row render time
+		gpio_put(15, 1);											//Scope testing row render time
 
 		if (winYJumpList[row] & 0x80) {								//Flag to jump to a different row in the nametable? (like for a status bar)
 			coarseY = winYJumpList[row] & 0x1F;						//Jump to row indicated by bottom 5 bits								
@@ -582,8 +761,8 @@ void sendFrame() {
 				for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
 				
 					uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
-					if (*sp == 0xF81F) {							//Transparent sprite pixel? Draw background color...				
-						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) + twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...				
+						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
 						*pointer++ = tempShort;						//...twice (fat pixels)
 						*pointer++ = tempShort;		
 					}
@@ -591,7 +770,7 @@ void sendFrame() {
 						*pointer++ = *sp;							//..twice (fat pixels)
 						*pointer++ = *sp;	
 					}
-					*sp = 0xF81F;									//When rendering the doubled sprite line, erase it so it's empty for next frame
+					*sp = spriteAlphaColor;									//When rendering the doubled sprite line, erase it so it's empty for next frame
 					sp++;
 					temp <<= 2;										//Shift for next 2 bit color pair
 
@@ -609,8 +788,8 @@ void sendFrame() {
 				for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
 				
 					uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
-					if (*sp == 0xF81F) {							//Transparent sprite pixel? Draw background color...				
-						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) + twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...				
+						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
 						*pointer++ = tempShort;						//...twice (fat pixels)
 						*pointer++ = tempShort;		
 					}
@@ -643,7 +822,7 @@ void sendFrame() {
 			}
 		}
 
-		gpio_put(14, 0);
+		gpio_put(15, 0);
 
 		dmaX(0, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
 
@@ -653,6 +832,7 @@ void sendFrame() {
 	}	
 }
 
+//Used by sendFrame to send 240x16 pixels to the ST7789 one row at a time. As the previous row is DMA'd to LCD the next row is drawn - efficient!
 void dmaX(int whatChannel, const void* data, int whatSize) {
 
     while(dma_channel_is_busy(whatChannel) == true) {}
@@ -683,17 +863,18 @@ bool isDMAbusy(int whatChannel) {
 	
 }
 
+//Plays a 11025Hz 8-bit mono WAVE file from file system using the PWM function and DMA on GPIO14 (gamebadge channel 4)
 void playAudio(const char* path) {
 	
 	if (audioPlaying == true) {			//Only one sound at a time
 		return;
 	}
 	
-	if (!file.open(path, O_RDONLY)) {	//Abort if FNF
+	if (!file.open(path, O_RDONLY)) {	//Abort if Don Bot's mercy file isn't found
 		return;
 	}
 
-	file.seekSet(40);				//Jump to file size
+	file.seekSet(40);				    //Jump to audio sample size part of WAVE file
 
 	audioSamples = file.read() | (file.read() << 8) | (file.read() << 16) | (file.read() << 24);	//Get # of samples
 	
@@ -710,11 +891,9 @@ void playAudio(const char* path) {
 
 	dmaAudio();									//Start the audio DMA
 
-	
-
 }
 
-void serviceAudio() {										//This is called every frame to see if buffers need re-loading
+void serviceAudio() {					//This is called every game frame to see if PCM audio buffers need re-loading
 
 	if (audioPlaying == false) {
 		return;
@@ -726,7 +905,7 @@ void serviceAudio() {										//This is called every frame to see if buffers ne
 	}
 	if (fillBuffer1flag == true) {
 		fillBuffer1flag = false;
-		endAudioBuffer1flag = fillAudioBuffer(1);
+		endAudioBuffer1flag = fillAudioBuffer(1);			//Fill buffer and return flag if we loaded the last of data
 	}	
 	
 }
@@ -737,7 +916,7 @@ bool fillAudioBuffer(int whichOne) {
 
 	//What if samples on 512 edge?
 
-	gpio_put(15, 1);
+	//gpio_put(15, 1);
 
 	if (audioSamples < audioBufferSize) {			//Are there fewer samples than that left in the file?
 		samplesToLoad = audioSamples;	
@@ -759,7 +938,7 @@ bool fillAudioBuffer(int whichOne) {
 		//file.read(audioBuffer1, samplesToLoad);
 	}
 	
-	gpio_put(15, 0);
+	//gpio_put(15, 0);
 	
 	if (samplesToLoad < audioBufferSize) {			//Not a full buffer? Means end of file, this is final DMA to do		
 		audioSamples = 0;							//Zero this out
@@ -793,7 +972,6 @@ void dmaAudio() {
     dma_channel_configure(1,
 						  &c0,
 						  &pwm_hw->slice[audio_pin_slice].cc,			//dst
-                          //&pio0_hw->txf[0],   // dst
                           audioBuffer0,   // src
                           audioBufferSize,  // transfer count
                           false           // Do not start immediately
@@ -815,7 +993,6 @@ void dmaAudio() {
     dma_channel_configure(2,
 							&c1,
 							&pwm_hw->slice[audio_pin_slice].cc,			//dst
-							//&pio0_hw->txf[0],   // dst
 							audioBuffer1,   // src
 							audioBufferSize,  // transfer count
 							false           // Do not start immediately
@@ -831,15 +1008,12 @@ void dmaAudio() {
 	
 }
 
-static void dma_handler_buffer0() {		//This is called when DMA block finishes
+static void dma_handler_buffer0() {		//This is called when DMA audio block0 finishes
 
-	if (endAudioBuffer0flag == true) {
+	if (endAudioBuffer0flag == true) {	
 		endAudioBuffer0flag = false;
 		audioPlaying =  false;
-		pwm_set_gpio_level(10, 128);
-		//pio_sm_put_blocking(pio, 0,  0x00);	//Zero out the speaker
-		//gpio_put(15, 0);
-		//dma_channel_abort(1);
+		pwm_set_gpio_level(14, 128);
 		dma_channel_abort(2);			//Kill the other channel
 	}
 	else {
@@ -852,16 +1026,13 @@ static void dma_handler_buffer0() {		//This is called when DMA block finishes
     
 }
 
-static void dma_handler_buffer1() {
+static void dma_handler_buffer1() {     //This is called when DMA audio block1 finishes
 
 	if (endAudioBuffer1flag == true) {
 		endAudioBuffer1flag = false;
 		audioPlaying =  false;
-		pwm_set_gpio_level(10, 128);
-		//pio_sm_put_blocking(pio, 0,  0x00);	//Zero out the speaker
-		//gpio_put(15, 0);
+		pwm_set_gpio_level(14, 128);
 		dma_channel_abort(1);			//Kill the other channel
-		//dma_channel_abort(2);
 	}
 	else {
 		dma_channel_set_read_addr(2, audioBuffer1, false);
@@ -871,8 +1042,6 @@ static void dma_handler_buffer1() {
     dma_hw->ints0 = (1u << 2);
     
 }
-
-
 
 
 //Callbacks for the USB Mass Storage Device-----------------------------------------------

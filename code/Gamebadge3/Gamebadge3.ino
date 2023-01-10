@@ -1,5 +1,6 @@
 #include <gameBadgePico.h>
 //Your defines here------------------------------------
+#include "hardware/pwm.h"
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
@@ -12,6 +13,8 @@ bool frameDrawing = false;					//Set TRUE when Core1 is drawing the display. Cor
 int xPos = 0;
 int yPos = 0;
 int dir = 0;
+
+int dutyOut;
 
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -39,42 +42,42 @@ void setup1() { //-----------------------Core 1 handles the graphics stuff
 
   int tileG = 0;
   
-  for (int y = 0 ; y < 16 ; y++) {  
+  // for (int y = 0 ; y < 16 ; y++) {  
   
-    for (int x = 0 ; x < 16 ; x++) {  
-      drawTile(x, y, tileG++ & 0xFF, y & 0x03);
-    } 
-     for (int x = 16 ; x < 32 ; x++) {  
-      drawTile(x, y, 'A', 0);
-    }
+    // for (int x = 0 ; x < 16 ; x++) {  
+      // drawTile(x, y, tileG++ & 0xFF, y & 0x03);
+    // } 
+     // for (int x = 16 ; x < 32 ; x++) {  
+      // drawTile(x, y, 'A', 0);
+    // }
      
-  } 
+  // } 
   
-  tileG = 0;
+  // tileG = 0;
   
-   for (int y = 16 ; y < 32 ; y++) {  
+   // for (int y = 16 ; y < 32 ; y++) {  
   
-    for (int x = 0 ; x < 16 ; x++) {  
-      drawTile(x, y, tileG++ & 0xFF, y & 0x03);
-    } 
-     for (int x = 16 ; x < 32 ; x++) {  
-      drawTile(x, y, 'B', 0);
-    }
+    // for (int x = 0 ; x < 16 ; x++) {  
+      // drawTile(x, y, tileG++ & 0xFF, y & 0x03);
+    // } 
+     // for (int x = 16 ; x < 32 ; x++) {  
+      // drawTile(x, y, 'B', 0);
+    // }
      
-  }  
+  // }  
   
 
-  for (int x = 0 ; x < 15 ; x++) {  
-    drawTile(x, 30, 10, 0x03);
-  } 
-  for (int x = 0 ; x < 15 ; x++) {  
-    drawTile(x, 31, 15, 0x03);
-  } 
+  // for (int x = 0 ; x < 15 ; x++) {  
+    // drawTile(x, 30, 10, 0x03);
+  // } 
+  // for (int x = 0 ; x < 15 ; x++) {  
+    // drawTile(x, 31, 15, 0x03);
+  // } 
  
   setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-  //setWinYJump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
-  //setWinYJump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
+  //setWinYjump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
+  //setWinYjump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
 
   add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);
 
@@ -128,10 +131,6 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	if (paused == true) {
 		return;
 	}
-
-	if (paused == true) {
-		return;
-	}
 	
 	while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
 		delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
@@ -140,7 +139,7 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	serviceAudio();
 	
-	//Controls, file access, etc...
+	//Controls, file access, Wifi etc...
 	
 	while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
 		delayMicroseconds(1);
@@ -148,12 +147,15 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 
 	//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 
-	//gpio_put(14, 1);
-
 	//setSpriteWindow(0, 0, 119, 119); //Set window in which sprites can appear (lower 2 rows off-limits because status bar)
 
-	//drawSprite(0, 0, 0, 0, 15, 7, 3);
-
+	drawSprite(0, 0, 0, 16, 15, 7, 4, false, false);
+	
+	drawSprite(0, 60, 0, 16, 15, 7, 5, false, false);
+	
+	drawSprite(0, 0, 1, 0, 3, false, false);
+	drawSprite(8, 0, 1, 0, 3, false, true);	
+	
 	// if (dir == 0) {
 		// if (++yPos == 239) {
 		  // dir = 1;
@@ -196,32 +198,61 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 		}	
 	}	
 	
+    uint slice_num = pwm_gpio_to_slice_num(14);
+    uint chan = pwm_gpio_to_channel(14);
+	
 	if (button(select_but)) {
-		   for (int y = 0 ; y < 32 ; y++) {  
+
+	  pwm_set_freq_duty(6, 0, 0);	  
+	  pwm_set_freq_duty(8, 0, 0);
+	  pwm_set_freq_duty(10, 0, 0);
+	  pwm_set_freq_duty(12, 0, 0);
+	  fillTiles(0, 0, 31, 31, ' ', 0);
 	  
-		 for (int x = 0 ; x < 32 ; x++) {  
-		  drawTile(x, y, ' ', 0);
-		}
-		 
-	  } 	
 	}
+
+
 
 	if (button(A_but)) {
 		//playAudio("audio/getread.wav");
-		drawText("0123456789ABC E brute?", 0, 0, true);
+		//drawText("0123456789ABC E brute?", 0, 0, true);
+		//pwm_set_freq_duty(slice_num, chan, 261, 25);
+		
+		// Serial.print(" s-");		
+		// Serial.print(pwm_gpio_to_slice_num(10), DEC);
+		// Serial.print(" c-");
+		// Serial.println(pwm_gpio_to_channel(10), DEC);
+		pwm_set_freq_duty(6, 261, 12);
+		//pwm_set_freq_duty(8, 277, 50);		
 	}
 	
 	
 	if (button(B_but)) {
+		//playAudio("audio/getread.wav");
 		//playAudio("audio/back.wav");
-		drawText("supercalifraguliosdosis", 0, 14, true);
+		//drawText("supercalifraguliosdosis", 0, 14, true);
+		pwm_set_freq_duty(6, 261, 25);
+		//pwm_set_freq_duty(8, 277, 50);
 	}	
 	
 	if (button(C_but)) {
 		//playAudio("audio/back.wav");
-		drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
+		//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
+		dutyOut = 50;
+		//pwm_set_freq_duty(12, 493, 25);
+		
 	}	
 	
+	
+	if (dutyOut > 0) {
+		pwm_set_freq_duty(12, 100 - dutyOut, 50);
+		dutyOut -= 10;
+		if (dutyOut < 1) {
+			dutyOut = 0;
+			pwm_set_freq_duty(12, 0, 0);
+		}
+		
+	}
 	
 	//gpio_put(14, 0);
 
