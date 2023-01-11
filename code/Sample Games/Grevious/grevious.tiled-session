@@ -10,15 +10,15 @@
     "file.lastUsedOpenFilter": "All Files (*)",
     "fileStates": {
         "grevious-tileset.tsx": {
-            "scaleInDock": 1,
+            "scaleInDock": 8,
             "scaleInEditor": 1
         },
         "testlevel.tmx": {
-            "scale": 10.133333333333333,
+            "scale": 3,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 32.121710526315795,
-                "y": 8.881578947368423
+                "x": 213.83333333333326,
+                "y": 91.16666666666666
             }
         }
     },

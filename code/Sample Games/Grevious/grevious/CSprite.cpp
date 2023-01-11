@@ -1,7 +1,7 @@
 #include "CSprite.h"
 #include <gameBadgePico.h>
 
-CSprite::CSprite(uint8_t TileX, uint8_t TileY, uint8_t TileSize, uint8_t Palette=0)
+CSprite::CSprite(uint8_t TileX, uint8_t TileY, uint8_t TileSize, uint8_t Palette=0, uint8_t YDrawOffset=0)
 {
     Tile_X = TileX;
     Tile_Y = TileY;
@@ -13,12 +13,13 @@ CSprite::CSprite(uint8_t TileX, uint8_t TileY, uint8_t TileSize, uint8_t Palette
     Y_Dir = 1;
     X_Spd = 1;
     Y_Spd = 1;
+    yDrawOffset = YDrawOffset;
     bAlive = false;
 }
 
 void CSprite::BitBlit()
 {
-    drawSprite(GetX(), GetY(), GetTileX(), GetTileY(), GetTileSize(), GetTileSize(), GetPaletteNum());
+    drawSprite(GetX(), GetY() + yDrawOffset, GetTileX(), GetTileY(), GetTileSize(), GetTileSize(), GetPaletteNum(), false, false);
 }
 
 bool CSprite::IsCollided(CSprite *csSource)
