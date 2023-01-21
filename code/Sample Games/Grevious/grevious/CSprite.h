@@ -16,8 +16,11 @@ class CSprite {
     void Init();
 
   public:
-    CSprite(uint8_t, uint8_t, uint8_t, uint8_t);
+    CSprite(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
     ~CSprite();
+
+    // Public Vars
+    uint8_t yDrawOffset = 0;
 
     // Work Methods
     void BitBlit();
