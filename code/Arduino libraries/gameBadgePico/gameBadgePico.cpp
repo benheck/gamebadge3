@@ -1,9 +1,6 @@
 //Game & graphics driver for gameBadgePico (MGC 2023)
 
 #include <hardware/pio.h>								//PIO hardware
-#include "audio.pio.h"									//Our assembled program
-PIO pio = pio0;
-uint programOffset;
 
 #include "Arduino.h"
 #include "pico_ST7789.h"
@@ -57,6 +54,7 @@ int xRight = 120;
 int yTop = -1;
 int yBottom = 120;
 
+
 uint32_t audioSamples = 0;
 uint8_t whichAudioBuffer = 0;
 bool audioPlaying = false;
@@ -76,7 +74,6 @@ const int notes[] = {
 };
 
 int indexToGPIO[9] = {7, 11, 9, 13, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
-//int indexToGPIO[9] = {6, 8, 7, 9, 21, 5, 4, 3, 2};		//Button index is UDLR SEL STR A B C  this maps that to the matching GPIO
 
 bool debounce[9] = {false, false, false, false, true, true, true, true, true};		//Index of which buttons have debounce (button must open before it can re-trigger)
 uint8_t debounceStart[9] = {0, 0, 0, 0, 5, 5, 1, 1, 1};								//If debounce, how many frames must button be open before it can re-trigger.
@@ -118,6 +115,10 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	gpio_init(15);								//Pinout for scope timing checks
 	gpio_set_dir(15, GPIO_OUT);
 	gpio_put(15, 0);
+	
+	gpio_init(26);								//Audio amp enable (active HIGH)
+	gpio_set_dir(26, GPIO_OUT);
+	gpio_put(26, 1);	
 	
 	gpio_set_function(14, GPIO_FUNC_PWM);
 	audio_pin_slice = pwm_gpio_to_slice_num(14);	
@@ -322,24 +323,61 @@ void loadPattern(const char* path, uint16_t start, uint16_t length) {	//Loads a 
 }
 
 //In tilemap position X/Y, draw the tile at index "whattile" from the pattern table using whatPalette (0-7)
-void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette) {
+void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags) {
+	
+		flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
 
-		nameTable[yPos][xPos] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
+		nameTable[yPos][xPos] = (flags << 8) | (whatPalette << 8) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
 }
 
 //In tilemap position X/Y, draw the tile at position tileX to the right, tileY down, from the pattern table using whatPalette (0-7)
-void drawTile(int tileX, int tileY, uint16_t patternX, uint16_t patternY, char whatPalette) {
+void drawTile(int tileX, int tileY, uint16_t patternX, uint16_t patternY, char whatPalette, int flags) {
+
+		flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
 
 		uint16_t whatTile = (patternY * 16) + patternX;						//Do this math for the user :)
 
-		nameTable[tileY][tileX] = (whatPalette << 10) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
+		nameTable[tileY][tileX] = (flags << 8) | (whatPalette << 8) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
 }
+
+//Sets flags on a tile (blocking, platform, etc). By default drawTile sets these as 0. You must use setTileType after using drawTile
+void setTileType(int tileX, int tileY, int flags) {						
+	
+	flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
+	nameTable[tileY][tileX] |= (flags << 8);		//OR it into the tile in nametable
+	
+}
+
+//Retrieves the flags set by the function above (bit-shifted back into the low byte) Use this to detect collisions, spikes and stuff
+int getTileType(int tileX, int tileY) {
+	
+	return (nameTable[tileY][tileX] >> 8) & 0xF8;
+	
+}
+
 
 //Used to fill or clear a large amount of tiles (should do on boot in case garbage in RAM though in theory arrays should boot at 0's)
 void fillTiles(int startX, int startY, int endX, int endY, uint16_t whatTile, char whatPalette) {
 	
 	endX++;
 	endY++;
+	
+	for (int y = startY ; y < endY ; y++) {		
+		for (int x = startX ; x < endX ; x++) {
+			drawTile(x, y, whatTile, whatPalette);
+		}		
+	}
+
+}
+
+//Used to fill or clear a large amount of tiles (should do on boot in case garbage in RAM though in theory arrays should boot at 0's)
+void fillTiles(int startX, int startY, int endX, int endY, uint16_t patternX, uint16_t patternY, char whatPalette) {
+	
+	endX++;
+	endY++;
+	
+	uint16_t whatTile = (patternY * 16) + patternX;						//Do this math for the user :)
+	
 	
 	for (int y = startY ; y < endY ; y++) {		
 		for (int x = startX ; x < endX ; x++) {
@@ -370,7 +408,9 @@ void setTextMargins(int left, int right) {
 }
 
 //Draws a string of horizontal text at position x,y in the tilemap and if doWrap=true follows word wrap rules, else just draws from left to right
-void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false) {
+void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap) {
+
+	//gpio_put(15, 1);
 
 	if (doWrap) {
 
@@ -460,7 +500,58 @@ void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false) {
 		}
 	}
 
+	//gpio_put(15, 0);
+
 }
+
+//Draws a string of horizontal text at position x,y in the sprite layer
+void drawSpriteText(const char *text, uint8_t x, uint8_t y, int whatPalette) {
+	
+	while(*text) {
+		drawSprite(x, y, *text++, whatPalette);
+		x += 8;
+	}
+		
+}
+
+void drawDecimal(int32_t theValue, uint8_t x, uint8_t y) {			//Send up to a 9 digit decimal value to memory
+
+	int zPad = 0;							//Flag for zero padding
+	uint32_t divider = 100000000;			//Divider starts at 900 million = max decimal printable is 999,999,999
+
+	for (int xx = 0 ; xx < 9 ; xx++) {		//9 digit number
+		if (theValue >= divider) {
+			nameTable[y][x++] = '0' + (theValue / divider);
+			theValue %= divider;
+			zPad = 1;
+		}
+		else if (zPad || divider == 1) {			
+			nameTable[y][x++] = '0';
+		}
+		divider /= 10;
+	}
+}
+
+void drawSpriteDecimal(int32_t theValue, uint8_t x, uint8_t y, int whatPalette) {			//Send up to a 9 digit decimal value to memory
+
+	int zPad = 0;							//Flag for zero padding
+	uint32_t divider = 100000000;			//Divider starts at 900 million = max decimal printable is 999,999,999
+
+	for (int xx = 0 ; xx < 9 ; xx++) {		//9 digit number
+		if (theValue >= divider) {
+			drawSprite(x, y, '0' + (theValue / divider), whatPalette);
+			theValue %= divider;
+			zPad = 1;
+			x += 8;
+		}
+		else if (zPad || divider == 1) {	
+			drawSprite(x, y, '0', whatPalette);		
+			x += 8;
+		}
+		divider /= 10;		
+	}
+}
+
 
 //Draws a sprite at xPos/yPos using a range of tiles from the pattern table, starting at tileX/Y, ending at xWide/yHigh, using whichpalette and flipped V/H if true 
 void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette, bool hFlip, bool vFlip) {
@@ -501,7 +592,7 @@ void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWi
 //Draws a single 8x8 sprite at xPos/yPos using a tile from the pattern table at tileX/Y, using whichpalette and flipped V/H if true 
 void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette, bool hFlip, bool vFlip) {
 
-	gpio_put(15, 1);
+	//gpio_put(15, 1);
 
 	tileX <<= 3;
 	tileY <<= 7;
@@ -568,9 +659,83 @@ void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whic
 		}		
 	}
 
-	gpio_put(15, 0);
+	//gpio_put(15, 0);
 
 }	
+
+//Draws a single 8x8 sprite at xPos/yPos using whichTile # from the pattern table, using whichpalette and flipped V/H if true 
+void drawSprite(int xPos, int yPos, uint16_t whichTile, uint8_t whichPalette, bool hFlip, bool vFlip) {
+
+	//gpio_put(15, 1);
+
+	whichTile <<= 3;			//Multiple by 8
+	
+	int lineYdir = 1;			//Normal sprites
+	int vFlipOffset = 0;
+	
+	if (vFlip) {				//Vertical flip
+		lineYdir = -1;
+		vFlipOffset = 7;
+	}
+		
+	if (hFlip) {
+		uint16_t *sp = &spriteBuffer[(yPos * 120) + xPos];    				  //Use pointer so less math later on
+		uint16_t *tilePointer = &patternTable[whichTile + vFlipOffset];
+
+		for (int yPixel = yPos ; yPixel < (yPos + 8) ; yPixel++) {
+
+			uint16_t temp = *tilePointer;						//Get pointer for sprite tile
+
+			for (int xPixel = xPos ; xPixel < (xPos + 8) ; xPixel++) {
+				
+				uint8_t twoBits = temp & 0x03;					//Get lowest 2 bits
+				
+				//For a sprite pixel to be drawn, it must be within the current window, not a 0 index color, and not over an existing sprite pixel
+				if (xPixel > xLeft && xPixel < xRight && yPixel > yTop && yPixel < yBottom && twoBits != 0 && *sp == spriteAlphaColor) {
+					*sp = paletteRGB[(whichPalette << 2) + twoBits];
+				}
+				sp++;
+				temp >>= 2;										//Shift for next 2 bit color pair
+
+			}
+			
+			tilePointer += lineYdir;			
+			sp += (120 - 8);
+			
+		}		
+	}
+	else {
+		uint16_t *sp = &spriteBuffer[(yPos * 120) + xPos];    				  //Use pointer so less math later on
+
+		uint16_t *tilePointer = &patternTable[whichTile + vFlipOffset];
+
+		for (int yPixel = yPos ; yPixel < (yPos + 8) ; yPixel++) {
+
+			uint16_t temp = *tilePointer;										//Get pointer for sprite tile
+
+			for (int xPixel = xPos ; xPixel < (xPos + 8) ; xPixel++) {
+				
+				uint8_t twoBits = temp >> 14;									//Smash this down into 2 lowest bits
+				
+				//For a sprite pixel to be drawn, it must be within the current window, not a 0 index color, and not over an existing sprite pixel
+				if (xPixel > xLeft && xPixel < xRight && yPixel > yTop && yPixel < yBottom && twoBits != 0 && *sp == spriteAlphaColor) {
+					*sp = paletteRGB[(whichPalette << 2) + twoBits];
+				}
+				sp++;
+				temp <<= 2;										//Shift for next 2 bit color pair
+
+			}
+			
+			tilePointer += lineYdir;			
+			sp += (120 - 8);
+			
+		}		
+	}
+
+	//gpio_put(15, 0);
+
+}	
+
 
 //Wipes entire sprite buffer with the transparent color
 void clearSprite() {
@@ -723,7 +888,8 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 	int whichBuffer = 0;						//We have 2 row buffers. We draw one, send via DMA, and draw next while DMA is running
 
 	uint16_t temp;
-
+	uint16_t tempPalette;
+	
 	uint8_t fineYsubCount = 0;
 	uint8_t fineYpointer; // = winYfine;
 	uint8_t coarseY; // = winY;	
@@ -734,7 +900,7 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 	for (int row = 0 ; row < 15 ; row++) {				  //15 rows of 8x8 fat pixels (16x16)
 
 		uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
-		gpio_put(15, 1);											//Scope testing row render time
+		//gpio_put(15, 1);											//Scope testing row render time
 
 		if (winYJumpList[row] & 0x80) {								//Flag to jump to a different row in the nametable? (like for a status bar)
 			coarseY = winYJumpList[row] & 0x1F;						//Jump to row indicated by bottom 5 bits								
@@ -756,13 +922,16 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 			temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];	//Get first line of pattern		
 			temp <<= (fineXPointer << 1);							//Pre-shift for horizontal scroll
 
+			tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
 			if (yLine & 0x01) {										//Drawing odd line on LCD/second line of fat pixels?							
 				sp -= 120;											//Revert sprite buffer point to draw every line twice
 				for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
 				
 					uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
-					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...				
-						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...	
+						uint16_t tempShort = paletteRGB[tempPalette | twoBits];	//Add those 2 bits to palette index to get color (0-3)
+						//uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
 						*pointer++ = tempShort;						//...twice (fat pixels)
 						*pointer++ = tempShort;		
 					}
@@ -781,6 +950,8 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 							tilePointer -= 32;						//Roll tile X pointer back 32
 						}				
 						temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];		//Fetch next line from pattern table
+						tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
 					}				
 				}				
 			}
@@ -788,8 +959,9 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 				for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
 				
 					uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
-					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...				
-						uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...
+						uint16_t tempShort = paletteRGB[tempPalette | twoBits];	//Add those 2 bits to palette index to get color (0-3)
+						//uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
 						*pointer++ = tempShort;						//...twice (fat pixels)
 						*pointer++ = tempShort;		
 					}
@@ -807,6 +979,8 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 							tilePointer -= 32;						//Roll tile X pointer back 32
 						}
 						temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];		//Fetch next line from pattern table
+						tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
 					}				
 				}								
 			}
@@ -822,7 +996,7 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 			}
 		}
 
-		gpio_put(15, 0);
+		//gpio_put(15, 0);
 
 		dmaX(0, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
 
@@ -867,7 +1041,8 @@ bool isDMAbusy(int whatChannel) {
 void playAudio(const char* path) {
 	
 	if (audioPlaying == true) {			//Only one sound at a time
-		return;
+		file.close();
+		//return;
 	}
 	
 	if (!file.open(path, O_RDONLY)) {	//Abort if Don Bot's mercy file isn't found

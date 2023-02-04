@@ -29,15 +29,24 @@
 	void dmaX(int whatChannel, const void* data, int whatSize);
 	bool isDMAbusy(int whatChannel);
 
-	void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette);
-	void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette);
+	void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags = 0x00);
+	void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette, int flags = 0x00);
+	void setTileType(int tileX, int tileY, int flags);
+	int getTileType(int tileX, int tileY);
 	void fillTiles(int startX, int startY, int endX, int endY, uint16_t whatTile, char whatPalette);
+	void fillTiles(int startX, int startY, int endX, int endY, uint16_t patternX, uint16_t patternY, char whatPalette);
 	void setASCIIbase(uint16_t whatBase);
 	void setTextMargins(int left, int right);
-	void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap);
+	void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false);
+	void drawSpriteText(const char *text, uint8_t x, uint8_t y, int whatPalette);
+	void drawDecimal(int32_t theValue, uint8_t x, uint8_t y);
+	void drawSpriteDecimal(int32_t theValue, uint8_t x, uint8_t y, int whatPalette);
 	
-	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette, bool hFlip, bool vFlip);
-	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette, bool hFlip, bool vFlip);
+	
+	void drawSprite(int xPos, int yPos, uint16_t whichTile, uint8_t whichPalette, bool hFlip = false, bool vFlip = false);
+	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint16_t xWide, uint16_t yHigh, uint8_t whichPalette, bool hFlip = false, bool vFlip = false);		
+	void drawSprite(int xPos, int yPos, uint16_t tileX, uint16_t tileY, uint8_t whichPalette, bool hFlip = false, bool vFlip = false);
+
 	void clearSprite();
 	void updatePalette(int position, char theIndex);
 	void updatePaletteRGB(int position, char r, char g, char b);
