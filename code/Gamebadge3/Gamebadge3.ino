@@ -29,8 +29,10 @@ bool budDir = false;	//True = going left
 int budX = 56;
 int budY = 8;
 
-uint16_t budWorldX = 8 * (6 + 7);					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
+uint16_t budWorldX = 8 * (6 + 7);			//Bud's position in the world (not the same as screen or tilemap)
 uint16_t budWorldY = 8;
+
+uint16_t budWx1, budWx2, budWy1, budWy2;	//Upper left and lower right edge of Bud's hit box. It changes depending on what he's doing
 
 int tail = 0;
 int blink = 0;
@@ -70,10 +72,14 @@ uint16_t xLevelStripRight = 26;			//Strip redraw position on right (when moving 
 #define hallElevator	5
 #define hallCallButton	6
 
-#define bigRobot		1
-#define chandelier		2
-#define roomba			3
-#define greenie			255
+#define bigRobot			1
+#define chandelier			2
+#define chandelierSmashed 	3
+#define roomba				10
+#define greenie				255
+
+bool chandelierFalling = false;
+int cWF = 0xFF;						//Stands for chandelier which falling it's short so functions don't get insane
 
 int currentFloor = 1;
 
@@ -82,10 +88,12 @@ int apartmentState[7] = { 0, 0, 255, 0, 0, 0, 0 };	//Zero index not used, starts
 bool elevatorOpen = false;
 
 #define maxThings		64
-
 thingObject thing[maxThings];
 
-int numberThings = 0;
+int totalThings = 0;
+int lastRemoved = 0xFF;
+int lastAdded = 0xFF;
+
 
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -235,118 +243,97 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
+	
 	if (++budSubFrame > 1) {
 		budSubFrame = 0;
-		animateBud = true;
+		animateBud = true;				//Set animate flag. Bud still moves/does logic on ones
 	}		
 
-	int speed = 1;
-	int budFrameLimit = 7;
 	int jumpGFXoffset = 6;						//Jumping up	
-			
+	
+	bool budNoMove = true;
+	
+	drawSprite(budX, budY, 0x0F, 0x09, 1, 1, 3, false, false);
+	
+	
 	switch(budState) {
 	
-		case rest:
-			if (animateBud) {
-				if (++tail > 2) {
-					tail = 0;
+		case rest:								//Rest = not moving left or right. Can still be jumping or falling
+			if (jump > 0) {
+				int offset = 6;					//Jumping up gfx (default)
+				
+				if (jump == 128) {
+					offset = 8;					//Falling down gfx
+				}			
+				if (budDir == false) {														//Falling facing right	
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
 				}
-				if (++blink > 40) {
-					blink = 0;
-				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				}				
 			}
-			if (budDir == false) {			//Right
-				drawSprite(budX, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-				drawSprite(budX + 8, budY, 7, 18, 4, budDir, false);		//Front feet
-				drawSprite(budX, budY - 8, 6, 17, 4, budDir, false);		//Back
-				
-				if (blink < 35) {
-					drawSprite(budX + 8, budY - 8, 7, 17, 4, budDir, false);
-				}
-				else {
-					drawSprite(budX + 8, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
-				}
+			else {
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);			//2x2 tile hit box (his ears don't count)
+	
+				if (budDir == false) {			//Right
+					drawSprite(budX, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX + 8, budY, 7, 18, 4, budDir, false);		//Front feet
+					drawSprite(budX, budY - 8, 6, 17, 4, budDir, false);		//Back
+					
+					if (blink < 35) {
+						drawSprite(budX + 8, budY - 8, 7, 17, 4, budDir, false);
+					}
+					else {
+						drawSprite(budX + 8, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+					}
 
-				drawSprite(budX + 8, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
-				
+					drawSprite(budX + 8, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+					
+				}
+				else {							//Left
+					drawSprite(budX + 8, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX, budY, 7, 18, 4, budDir, false);		//Front feet
+					drawSprite(budX + 8, budY - 8, 6, 17, 4, budDir, false);		//Back
+					
+					if (blink < 35) {
+						drawSprite(budX, budY - 8, 7, 17, 4, budDir, false);
+					}
+					else {
+						drawSprite(budX, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+					}
+
+					drawSprite(budX, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+				}	
+				if (animateBud) {
+					if (++tail > 2) {
+						tail = 0;
+					}
+					if (++blink > 40) {
+						blink = 0;
+					}
+				}				
 			}
-			else {							//Left
-				drawSprite(budX + 8, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-				drawSprite(budX, budY, 7, 18, 4, budDir, false);		//Front feet
-				drawSprite(budX + 8, budY - 8, 6, 17, 4, budDir, false);		//Back
-				
-				if (blink < 35) {
-					drawSprite(budX, budY - 8, 7, 17, 4, budDir, false);
-				}
-				else {
-					drawSprite(budX, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
-				}
-
-				drawSprite(budX, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
-			}		
 			break;
 		
-		case moving:							
-			budFrameLimit = 6;
+		case moving:		
 			if (budDir == false) {		
 				drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
 				budMoveRight(3);		
 			}
 			else {				
 				drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+				setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 				budMoveLeft(3);		
 			}
 			if (animateBud) {
-				if (++budFrame > budFrameLimit) {
+				if (++budFrame > 6) {
 					budFrame = 0;
 				}					
 			}			
 			break;	
-
-		case jumping:
-			if (jump == 128) {
-				jumpGFXoffset = 8;						//Falling down
-			}
-		
-			if (budDir == false) {	
-				drawSprite(budX, budY - 8, 0, 16 + jumpGFXoffset, 3, 2, 4, budDir, false);
-				if (moveJump == true) {
-					budMoveRight(3);	
-				}				
-			}
-			else {		
-				drawSprite(budX - 8, budY - 8, 0, 16 + jumpGFXoffset, 3, 2, 4, budDir, false);
-				if (moveJump == true) {
-					budMoveLeft(3);	
-				}		
-			}				
-
-			break;
-
-		case stopping:
-			drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	
-			if (animateBud) {
-				if (budFrame == 0) {
-					budState = rest;
-				}								
-				if (++budFrame > 6) {
-					budFrame = 0;
-				}					
-			}	
-			if (budDir == false) {
-				xPos += 1;			
-				if (xPos > 255) {
-					xPos -= 256;
-				}					
-			}
-			else {
-				xPos -= 1;			
-				if (xPos < 0) {
-					xPos += 256;
-				}					
-			}				
-			break;
-
 	}
 
 	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
@@ -371,7 +358,7 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 			if (jump == 0) {			//Weren't already falling?
 				velocikitten = 2;		//Means we walked off a ledge, reset velocity
 				jump = 128;				//Set falling state
-				budState = jumping;
+				//budState = jumping;
 			}
 
 			budY += velocikitten;					//Fall
@@ -391,22 +378,21 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	}
 
+	if (button(C_but)) {
+		//playAudio("audio/back.wav");
+		//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
+		//dutyOut = 50;
+		//pwm_set_freq_duty(12, 493, 25);
+		
+		if (jump == 0) {
+			jump = 1;
+			velocikitten = 9;
+			budNoMove = false;
+			//budState = jumping;	
+		}
+		
+	}		
 	
-	thingLogic();
-	
-
-	
-	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
-
-	// setWindowSlice(0, xPos << 1); 			//Last 2 rows set no scroll
-	// setWindowSlice(1, xPos << 1); 			//Last 2 rows set no scroll	
-	// setWindowSlice(2, xPos << 1); 			//Last 2 rows set no scroll
-	// setWindowSlice(3, xPos << 1); 			//Last 2 rows set no scroll		
-	//setWindowSlice(14, xPos << 1); 
-
-	bool budNoMove = true;
-	moveJump = false;
-
 	if (button(left_but)) {
 		budDir = true;
 	
@@ -467,26 +453,31 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 
 	}
 	
-	if (button(C_but)) {
-		//playAudio("audio/back.wav");
-		//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
-		//dutyOut = 50;
-		//pwm_set_freq_duty(12, 493, 25);
-		
-		if (jump == 0) {
-			jump = 1;
-			velocikitten = 9;
-			budNoMove = false;
-			budState = jumping;	
-		}
-		
-	}		
-	
+
 	if (budNoMove == true && budState == moving) {		//Was Bud moving, but then d-pad released? Bud comes to a stop
-		budState = stopping;
+		budState = rest;
 		budFrame = 0;
 	}
 		
+	
+	
+	
+	thingLogic();
+	
+
+	
+	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+
+	// setWindowSlice(0, xPos << 1); 			//Last 2 rows set no scroll
+	// setWindowSlice(1, xPos << 1); 			//Last 2 rows set no scroll	
+	// setWindowSlice(2, xPos << 1); 			//Last 2 rows set no scroll
+	// setWindowSlice(3, xPos << 1); 			//Last 2 rows set no scroll		
+	//setWindowSlice(14, xPos << 1); 
+
+
+	moveJump = false;
+
+	
     uint slice_num = pwm_gpio_to_slice_num(14);
     uint chan = pwm_gpio_to_channel(14);
 	
@@ -547,10 +538,11 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	//drawSpriteText("GAME OVAH", 16, 16, 3);
 	
-	drawSpriteDecimal(budWorldX, 60, 0, 0);
-	drawSpriteDecimal(budWorldY, 50, 8, 0);	
-	drawSpriteDecimal(numberThings, 40, 16, 0);
-	drawSpriteDecimal(worldX, 30, 24, 0);	
+	drawSpriteDecimal(lastAdded, 10, 0, 0);		
+	drawSpriteDecimal(lastRemoved, 10, 8, 0);
+	drawSpriteDecimal(budWorldY, 10, 16, 0);	
+	drawSpriteDecimal(totalThings, 10, 24, 0);
+
 	
 	// drawSpriteDecimal(budX, 8, 0, 0);		
 	// drawSpriteDecimal(xWindowBudFine, 8, 8, 0);	
@@ -558,6 +550,14 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
 
 
+}
+
+void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
+	
+	budWx1 = x1;
+	budWy1 = y1;	
+	budWx2 = x2;
+	budWy2 = y2;	
 }
 
 bool budMoveLeft(int speed) {
@@ -767,10 +767,16 @@ void drawHallway(int floor) {
 		
 	}	
 
-	for (int x = 100 ; x < 1000 ; x += 75) {
+	for (int x = 150 ; x < 1000 ; x += 100) {
 		thingAdd(greenie, x, 32);
 	}
-
+	
+	thingAdd(chandelier, 200, 8);
+	thingAdd(chandelier, 344, 8);	
+	thingAdd(chandelier, 488, 8);
+	thingAdd(chandelier, 664, 8);
+	thingAdd(chandelier, 808, 8);
+	thingAdd(chandelier, 952, 8);
 
 	xStripDrawing = xStripLeft;
 	
@@ -1105,29 +1111,50 @@ void drawChandelier(int tileX) {
 
 bool thingAdd(int whichThing, int16_t x, int16_t y) {
 	
-	if (numberThings == maxThings) {
+	int index;
+	
+	for (index = 0 ; index < maxThings ; index++) {
+		if (thing[index].active == false) {				//Found a slot? Break
+			break;
+		}
+	}
+	
+	if (index == maxThings) {							//Didn't find a slot? Return false
 		return false;
 	}
 
 	switch(whichThing) {
 	
 		case bigRobot:
-			thing[numberThings].active =  true;
-			thing[numberThings].type = bigRobot;
-			thing[numberThings].setPos(1104, 64);
-			thing[numberThings].dir = 0;		
+			thing[index].active =  true;
+			thing[index].type = bigRobot;
+			thing[index].setPos(1104, 64);
+			thing[index].dir = 0;
+			thing[index].setSize(3 * 8, 6 * 8);
 			break;
 			
 		case greenie:
-			thing[numberThings].active =  true;
-			thing[numberThings].type = greenie;
-			thing[numberThings].setPos(x, y);
-			thing[numberThings].dir = 0;		
+			thing[index].active =  true;
+			thing[index].type = greenie;
+			thing[index].setPos(x, y);
+			thing[index].dir = 0;	
+			thing[index].setSize(8, 8);	
 			break;	
+			
+		case chandelier:
+			thing[index].active =  true;
+			thing[index].type = chandelier;
+			thing[index].setPos(x, y);
+			thing[index].state = 1;	
+			thing[index].setSize(4 * 8, 3 * 8);
+			break;				
+			
 			
 	}
 	
-	numberThings++;
+	totalThings++;
+	
+	lastAdded = index;
 
 	return true;
 	
@@ -1135,20 +1162,13 @@ bool thingAdd(int whichThing, int16_t x, int16_t y) {
 
 bool thingRemove(int whichThing) {
 
-	if (whichThing == 0xFF) {							//No param? Pop last thing
-		if (numberThings > 0) {
-			numberThings--;							//Dec down. Next thing added goes in this slot
-			thing[numberThings].active = false;		//Make inactive (vars still there since no dynamic mem)
-			return true;
-		}
-	}
-	else {
-		if (thing[numberThings].active = true) {
-			thing[numberThings].active = false;
-			return true;
-		}		
-	}
-	
+	if (thing[whichThing].active = true) {
+		thing[whichThing].active = false;
+		totalThings--;							//Decrement count
+		lastRemoved = whichThing;
+		return true;
+	}		
+
 	return false;
 
 }
@@ -1157,44 +1177,84 @@ void thingLogic() {
 
 	gpio_put(15, 1);
 
-	if (numberThings > 0) {
-		for (int g = 0 ; g < (numberThings) ; g++) {
-			if (thing[g].active) {
+	for (int g = 0 ; g < maxThings ; g++) {
+		if (thing[g].active) {
+			
+			switch(thing[g].type) {
 				
-				switch(thing[g].type) {
-					
-					case bigRobot:
-						thing[g].scan(worldX, worldY);
-						if (thing[g].dir == 0) {
-							thing[g].xPos -= 2;
-							if (thing[g].xPos <= 55) {
-								thing[g].dir = 1;
-							}				
-						}
-						else {
-							thing[g].xPos += 2;
-							if (thing[g].xPos >= 1104) {
-								thing[g].dir = 0;
-							}					
-						}						
-						
-						break;
-					
-					case greenie:
-						thing[g].scanG(worldX, worldY);
+				case bigRobot:
+					thing[g].scan(worldX, worldY);
+			
+					if (thing[g].dir == 0) {
+						thing[g].xPos -= 2;
+						if (thing[g].xPos <= 55) {
+							thing[g].dir = 1;
+						}				
+					}
+					else {
+						thing[g].xPos += 2;
+						if (thing[g].xPos >= 1104) {
+							thing[g].dir = 0;
+						}					
+					}	
 
-						if (thing[g].hitBox(budWorldX, budWorldY - 16, budWorldX + 24, budWorldY) == true) {
-							thing[g].active = false;
-							playAudio("audio/greenie.wav");
-						}
-						
-						break;					
+					if (chandelierFalling == true) {				//Danger Will Robinson!
+						//Only 1 can fall at once. Pass its XY wide high to the robot and see if collision
+						if (thing[g].hitBox(thing[cWF].xPos, thing[cWF].yPos, thing[cWF].xPos + 32, thing[cWF].yPos + 24) == true) {
+							thingRemove(g);
+							playAudio("audio/glass_0.wav");
+						}									
+					}					
 					
-				}
+					break;
+				
+				case greenie:
+					thing[g].scanG(worldX, worldY);
+
+					if (thing[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
+						thingRemove(g);
+						playAudio("audio/greenie.wav");
+					}
+					
+					break;	
+					
+				case chandelier:
+					thing[g].scanC1(worldX, worldY);
+
+					switch(thing[g].state) {
+					
+						case 1:											//Still installed
+							if (thing[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {
+								thing[g].state = 2;
+								chandelierFalling = true;
+								cWF = g;								//Index of which one is falling
+								playAudio("audio/glass_loose.wav");
+							}							
+							break;
+							
+						case 2:											//Falling
+							thing[g].yPos += thing[g].animate;							
+							if (thing[g].animate < 8) {
+								thing[g].animate++;
+							}
+							if (thing[g].yPos > 94) {
+								thing[g].yPos = 103;
+								thing[g].type = chandelierSmashed;
+								chandelierFalling = false;
+								playAudio("audio/glass_2.wav");	
+							}
+							break;	
+					}
+					break;	
+					
+				case chandelierSmashed:
+					thing[g].scanC2(worldX, worldY);
+					//Can robot clean up?
+					break;							
+				
 			}
 		}
-		
-	}	
+	}
 	
 	gpio_put(15, 0);
 	
