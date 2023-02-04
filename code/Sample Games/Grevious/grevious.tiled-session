@@ -3,40 +3,89 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "testlevel.tmx",
+    "activeFile": "testlevel.tmj",
     "expandedProjectPaths": [
         "."
     ],
     "file.lastUsedOpenFilter": "All Files (*)",
     "fileStates": {
-        "grevious-tileset.tsx": {
-            "scaleInDock": 8,
-            "scaleInEditor": 1
+        "C:/Users/kenst/OneDrive/1 Projects/SuperTraf/From Surface Go/supertraf.old/level01.tmx": {
+            "scale": 2,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 547,
+                "y": 36.25
+            }
         },
-        "testlevel.tmx": {
-            "scale": 3,
+        "C:/Users/kenst/OneDrive/1 Projects/SuperTraf/From Surface Go/supertraf.old/sprites.tsx": {
+            "scaleInDock": 1
+        },
+        "C:/Users/kenst/OneDrive/1 Projects/SuperTraf/From Surface Go/supertraf.old/tiles.tsx": {
+            "scaleInDock": 1
+        },
+        "grevious-tileset.tsx": {
+            "scaleInDock": 4,
+            "scaleInEditor": 11
+        },
+        "grevious.tsx": {
+            "scaleInDock": 1,
+            "scaleInEditor": 11
+        },
+        "sprites.tsx": {
+            "scaleInDock": 4,
+            "scaleInEditor": 11
+        },
+        "testlevel.json": {
+            "scale": 1.9704583333333332,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 213.83333333333326,
-                "y": 91.16666666666666
+                "x": 600.3679347021633,
+                "y": 60.13829269839928
+            }
+        },
+        "testlevel.tmj": {
+            "expandedGroupLayers": [
+                6
+            ],
+            "expandedObjectLayers": [
+                4
+            ],
+            "scale": 3,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 430.66666666666663,
+                "y": 31.166666666666664
+            }
+        },
+        "testlevel.tmx": {
+            "scale": 4,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 261,
+                "y": 72.75
             }
         }
     },
-    "last.exportedFilePath": "C:/code/gamebadge3-ben/code/Samples Games/Grevious",
-    "last.imagePath": "C:/Users/kenst/OneDrive/1 Projects/grevious",
+    "last.exportedFilePath": "C:/code/gamebadge3-ben/code/Sample Games/Grevious",
+    "last.imagePath": "E:/code/gamebadge3-ben/code/Sample Games/Grevious",
     "map.height": 15,
     "map.lastUsedExportFilter": "GameMaker Studio 2 files (*.yy)",
-    "map.lastUsedFormat": "tmx",
+    "map.lastUsedFormat": "json",
     "map.tileHeight": 8,
     "map.tileWidth": 8,
     "openFiles": [
-        "testlevel.tmx",
+        "testlevel.tmj",
         "grevious-tileset.tsx"
     ],
     "project": "grevious.tiled-project",
     "recentFiles": [
         "grevious-tileset.tsx",
-        "testlevel.tmx"
+        "testlevel.tmj",
+        "sprites.tsx",
+        "C:/Users/kenst/OneDrive/1 Projects/SuperTraf/From Surface Go/supertraf.old/level01.tmx",
+        "testlevel.tmx",
+        "testlevel.json",
+        "grevious.tsx"
     ],
     "tileset.lastUsedFormat": "tsx",
     "tileset.tileSize": {

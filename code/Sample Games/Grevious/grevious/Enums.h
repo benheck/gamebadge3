@@ -10,14 +10,12 @@ enum MobPatterns {
     MP_05,  // Wave
 };
 
-enum MobType {
-    MT_UFO,
-};
-
 enum GameState {
     GS_TITLE,
     GS_GAME,
     GS_DEBUG,
+    GS_GAMEOVER,
+    GS_DEATH
 };
 
 #endif
