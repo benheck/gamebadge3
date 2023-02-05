@@ -19,7 +19,7 @@ int dir = 0;
 
 int dutyOut;
 
-enum movement { rest, starting, walking, running, jumping, moving, turning, stopping };
+enum movement { rest, starting, walking, running, jumping, moving, turning, stopping, entering, exiting };
 
 movement budState = rest;
 
@@ -64,13 +64,14 @@ uint16_t xLevelStripRight = 26;			//Strip redraw position on right (when moving 
 #define tilePlatform		0x80
 #define tileBlocked			0x40
 
-#define hallDoor		1
 #define hallBlank		0
 #define hallCounter		2
 #define hallLeftWall	3
 #define hallRightWall	4
 #define hallElevator	5
 #define hallCallButton	6
+#define hallDoorClosed	10
+#define hallDoorOpen	11
 
 #define bigRobot			1
 #define chandelier			2
@@ -83,9 +84,13 @@ int cWF = 0xFF;						//Stands for chandelier which falling it's short so functio
 
 int currentFloor = 1;
 
-int apartmentState[7] = { 0, 0, 255, 0, 0, 0, 0 };	//Zero index not used, starts at 1 goes to 6
+int doorTilePos[6] = { 16, 34, 52, 92, 110, 128 };
 
-bool elevatorOpen = false;
+char apartmentState[7] = { 0, 0, 0, 0, 0, 0, 0 };	//Zero index not used, starts at 1 goes to 6
+
+bool elevatorOpen = true;
+
+int inArrowFrame = 0;
 
 #define maxThings		64
 thingObject thing[maxThings];
@@ -112,7 +117,7 @@ void setup() { //------------------------Core0 handles the file system and game 
 		paused = false;   							//Allow core 2 to draw once loaded
 	}
 
-	//setButtonDebounce(B_but, false, 0);
+	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 	
@@ -253,9 +258,6 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	bool budNoMove = true;
 	
-	drawSprite(budX, budY, 0x0F, 0x09, 1, 1, 3, false, false);
-	
-	
 	switch(budState) {
 	
 		case rest:								//Rest = not moving left or right. Can still be jumping or falling
@@ -334,6 +336,26 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 				}					
 			}			
 			break;	
+	
+		case entering:
+			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
+		
+			if (animateBud) {
+				if (budFrame & 0x02) {
+					budDir = false;
+				}					
+				else {
+					budDir = true;
+				}
+				if (++budFrame > 15) {
+					budFrame = 0;
+				}
+			}		
+		
+			break;
+	
+	
+	
 	}
 
 	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
@@ -492,26 +514,69 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	}
 
 
+	int tempCheck = checkDoors();			//See if Bud is standing in front of a door
+	
+	if (tempCheck > -1 && budState != entering) {					//He is? tempCheck contains a index # of which one (0-5)
+		
+		if ((apartmentState[tempCheck] & 0xC0) == 0x00) {	//If apartment cleared or door already open bits set, no action can be taken
 
-	if (button(A_but)) {
-		// budY = 15;
-		// velocikitten = 1;
-		// jump = 255;
-		// playAudio("audio/getread.wav");
+			if (button(up_but)) {
+				apartmentState[tempCheck] |= 0x40;								//Set the door open bit
+				playAudio("audio/doorOpen.wav");
+				populateDoor(doorTilePos[tempCheck], tempCheck + 1, true);		//Stuffs the high byte with BCD floor/door number
+				redrawCurrentHallway();
+				budState = entering;
+				budFrame = 0;
+			}
+			
+			drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+			drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+			
+			if (++inArrowFrame > 7) {
+				inArrowFrame = 0;
+			}
+	
+		}
 		
+	}
+
+	if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
 		
-		thingRemove(0xFF);
+		if (elevatorOpen == true) {							//Ready for the next level?
+
+			if (button(up_but)) {
+				playAudio("audio/elevDing.wav");
+				budState = entering;
+				budFrame = 0;				
+			}
+			
+			drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+			drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+			
+			if (++inArrowFrame > 7) {
+				inArrowFrame = 0;
+			}
+	
+		}
 		
-		//drawText("0123456789ABC E brute?", 0, 0, true);
-		//pwm_set_freq_duty(slice_num, chan, 261, 25);
+	}
+
+	// if (button(up_but)) {
+
+		// budState = entering;
+		
+		// thingRemove(0xFF);
+		
+		// drawText("0123456789ABC E brute?", 0, 0, true);
+		// pwm_set_freq_duty(slice_num, chan, 261, 25);
 		
 		// Serial.print(" s-");		
 		// Serial.print(pwm_gpio_to_slice_num(10), DEC);
 		// Serial.print(" c-");
 		// Serial.println(pwm_gpio_to_channel(10), DEC);
-		//pwm_set_freq_duty(6, 261, 12);
-		//pwm_set_freq_duty(8, 277, 50);		
-	}
+		// pwm_set_freq_duty(6, 261, 12);
+		// pwm_set_freq_duty(8, 277, 50);		
+	// }
 	
 	
 	if (button(B_but)) {
@@ -538,8 +603,8 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	//drawSpriteText("GAME OVAH", 16, 16, 3);
 	
-	drawSpriteDecimal(lastAdded, 10, 0, 0);		
-	drawSpriteDecimal(lastRemoved, 10, 8, 0);
+	drawSpriteDecimal(budWorldX >> 3, 10, 0, 0);		
+	drawSpriteDecimal(budWorldX, 10, 8, 0);
 	drawSpriteDecimal(budWorldY, 10, 16, 0);	
 	drawSpriteDecimal(totalThings, 10, 24, 0);
 
@@ -646,7 +711,7 @@ bool windowMoveLeft(int theSpeed) {
 
 bool windowMoveRight(int theSpeed) {
 	
-	if (budX < 64) {
+	if (budX < 56) {
 		return false;
 	}
 	
@@ -729,6 +794,42 @@ int budTileCheck(int whereTo) {
 }
 
 
+int checkDoors() {
+	
+	uint16_t tileX = budWorldX >> 3;			//Convert Bud fine world X to tiles X
+
+	if (budY != 104) {							//Doors only ping if Bud is on floor		
+		return -1;
+	}
+
+	for (int x = 0 ; x < 6 ; x++) {
+	
+		if (tileX >= doorTilePos[x] && tileX <= (doorTilePos[x] + 2)) {			//Is Bud aligned with a door?
+			return x;
+		}
+	
+	}
+
+	return -1;
+	
+}
+
+int checkElevator() {
+	
+	uint16_t tileX = budWorldX >> 3;			//Convert Bud fine world X to tiles X
+
+	if (budY != 104) {							//Elevator only pings if Bud is on floor		
+		return -1;
+	}
+
+	if (tileX >= 71 && tileX <= 75) {			//Is Bud aligned with elevator?
+		return 1;
+	}
+
+	return -1;
+	
+}
+
 void drawHallway(int floor) {
 
 	for (int x = 0 ; x < 148 ; x++) {
@@ -744,7 +845,7 @@ void drawHallway(int floor) {
 
 	for (int x = 0 ; x < 3 ; x++) {
 		populateObject(xx, hallCounter, 4);
-		populateDoor(xx + 6, drawWhichDoor++);				//Stuffs the high byte with BCD floor/door number
+		//populateDoor(xx + 6, drawWhichDoor++, false);				//Stuffs the high byte with BCD floor/door number
 		populateObject(xx + 12, hallCounter, 4);	
 
 		xx += 18;
@@ -760,12 +861,19 @@ void drawHallway(int floor) {
 
 	for (int x = 0 ; x < 3 ; x++) {
 		populateObject(xx, hallCounter, 4);
-		populateDoor(xx + 6, drawWhichDoor++);				//Stuffs the high byte with BCD floor/door number
+		//populateDoor(xx + 6, drawWhichDoor++, false);				//Stuffs the high byte with BCD floor/door number
 		populateObject(xx + 12, hallCounter, 4);	
 
 		xx += 18;
 		
 	}	
+	
+	for (int x = 0 ; x < 6 ; x++) {
+	
+		populateDoor(doorTilePos[x], x + 1, false);
+		
+	}
+	
 
 	for (int x = 150 ; x < 1000 ; x += 100) {
 		thingAdd(greenie, x, 32);
@@ -778,25 +886,39 @@ void drawHallway(int floor) {
 	thingAdd(chandelier, 808, 8);
 	thingAdd(chandelier, 952, 8);
 
-	xStripDrawing = xStripLeft;
+	redrawCurrentHallway();
 	
-	for (int x = xLevelStripLeft ; x < (xLevelStripRight + 1) ; x++) {
-		drawHallwayTiles(x);
-		xStripDrawing++;	
-	}
-	
-	// drawDecimal(234567, 0, 0);
+	//drawDecimal(234567, 0, 0);
 	
 	//drawText("Sloths are fun!", 0, 0, 1, false);
 
 }
 
-void populateDoor(uint16_t levelStrip, int whichDoorNum) {
+void redrawCurrentHallway() {
+	
+	xStripDrawing = xStripLeft;					
+
+	for (int x = xLevelStripLeft ; x < (xLevelStripRight + 1) ; x++) {
+		drawHallwayTiles(x);
+		if (++xStripDrawing > 31) {
+			xStripDrawing = 0;
+		}
+	}	
+	
+}
+
+void populateDoor(uint16_t levelStrip, int whichDoorNum, bool doorState) {
 
 	char stripCount = 0;
 
+	int item = hallDoorClosed;
+	
+	if (doorState == true) {
+		item = hallDoorOpen;
+	}
+
 	for (int x = 0 ; x < 4 ; x++) {
-		level[levelStrip + x] = ((hallDoor << 3) | stripCount) | (currentFloor << 12) | (whichDoorNum << 8);
+		level[levelStrip + x] = ((item << 3) | stripCount) | (currentFloor << 12) | (whichDoorNum << 8);
 		stripCount++;
 	}
 	
@@ -827,10 +949,7 @@ void drawHallwayTiles(uint16_t levelStrip) {
 		
 		case 0:
 			hallwayBlankStrip(whichStrip);
-		break;		
-		case 1:
-			hallwayDoorStrip(whichStrip, doorNum);		//Pass the door #
-		break;
+		break;					
 		case 2:
 			hallwayCounterStrip(whichStrip);
 		break;
@@ -845,6 +964,12 @@ void drawHallwayTiles(uint16_t levelStrip) {
 		break;		
 		case 6:
 			hallwayCallButton(whichStrip);
+		break;	
+		case 10:
+			hallwayDoorStripClosed(whichStrip, doorNum);		//Pass the door #
+		break;
+		case 11:
+			hallwayDoorStripOpen(whichStrip, doorNum);		//Pass the door #
 		break;			
 	
 	}
@@ -962,7 +1087,7 @@ void hallwayWallRight(int whichStrip) {		//Hallway object 3
 
 }	
 
-void hallwayDoorStrip(int whichStrip, int whichDoorNum) {		//Hallway object 1
+void hallwayDoorStripClosed(int whichStrip, int whichDoorNum) {		//Hallway object 1
 
 	const char tiles[4][9] = {
 		{ 0x99, 0x93, 0x93, 0x93, 0x93, 0x93, 0x93, 0x90, 0xA0 },
@@ -986,7 +1111,7 @@ void hallwayDoorStrip(int whichStrip, int whichDoorNum) {		//Hallway object 1
 	}
 	
 	if (whichStrip == 1) {		
-		if (apartmentState[whichDoorNum & 0x0F] == 255) {		//Apartment destoyed?
+		if (apartmentState[whichDoorNum & 0x0F] & 0x80) {		//Apartment destoyed? (MSB set)
 			drawTile(xStripDrawing, 8, 0x9F, 0);				//Draw X
 		}
 		else {
@@ -1002,6 +1127,31 @@ void hallwayDoorStrip(int whichStrip, int whichDoorNum) {		//Hallway object 1
 		}			
 	}	
 	
+}
+
+void hallwayDoorStripOpen(int whichStrip, int whichDoorNum) {		//Hallway object 1
+
+	const char tiles[4][9] = {
+		{ 0x8E, 0x8D, 0x8D, 0x8D, 0x8D, 0x8D, 0x8D, 0x8A, 0xA0 },
+		{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x8B, 0xA1 },	
+		{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x8B, 0xA1 },		
+		{ 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8C, 0xA3 },		
+	};
+
+	drawTile(xStripDrawing, 14, 0x9E, 3, tileBlocked);		//Draw floor
+
+	for (int g = 0 ; g < 8 ; g++) {
+		drawTile(xStripDrawing, 13 - g, tiles[whichStrip][g], 0);		//Floor tile
+	}
+	
+	setTileType(xStripDrawing, 13, tilePlatform);
+	
+	drawTile(xStripDrawing, 5, tiles[whichStrip][8], 3, tilePlatform);	//Draw top sil of doorway as platform
+
+	for (int g = 0 ; g < 5 ; g++) {
+		drawTile(xStripDrawing, g, 0x9D, 3);		//Blank walls
+	}
+		
 }
 
 void hallwayCounterStrip(int whichStrip) {	//Hallway object 2
@@ -1059,12 +1209,12 @@ void hallwayElevator(int whichStrip) {		//Hallway object 5
 	else {
 		const char tiles[8][10] = {
 			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA0 },
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
-			{ 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xF9, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
 			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA3 },		
 		};
 
@@ -1127,17 +1277,21 @@ bool thingAdd(int whichThing, int16_t x, int16_t y) {
 	
 		case bigRobot:
 			thing[index].active =  true;
+			thing[index].state = 1;						//Active
 			thing[index].type = bigRobot;
-			thing[index].setPos(1104, 64);
-			thing[index].dir = 0;
+			thing[index].setPos(400, 64);
+			thing[index].dir = true;					//Starts out facing left
 			thing[index].setSize(3 * 8, 6 * 8);
+			thing[index].turning = false;
+			thing[index].subAnimate = 0;
 			break;
 			
 		case greenie:
 			thing[index].active =  true;
 			thing[index].type = greenie;
 			thing[index].setPos(x, y);
-			thing[index].dir = 0;	
+			thing[index].dir = true;
+			thing[index].animate = 3;
 			thing[index].setSize(8, 8);	
 			break;	
 			
@@ -1184,28 +1338,54 @@ void thingLogic() {
 				
 				case bigRobot:
 					thing[g].scan(worldX, worldY);
-			
-					if (thing[g].dir == 0) {
-						thing[g].xPos -= 2;
-						if (thing[g].xPos <= 55) {
-							thing[g].dir = 1;
-						}				
-					}
-					else {
-						thing[g].xPos += 2;
-						if (thing[g].xPos >= 1104) {
-							thing[g].dir = 0;
-						}					
-					}	
 
-					if (chandelierFalling == true) {				//Danger Will Robinson!
-						//Only 1 can fall at once. Pass its XY wide high to the robot and see if collision
-						if (thing[g].hitBox(thing[cWF].xPos, thing[cWF].yPos, thing[cWF].xPos + 32, thing[cWF].yPos + 24) == true) {
-							thingRemove(g);
-							playAudio("audio/glass_0.wav");
-						}									
-					}					
-					
+					switch(thing[g].state) {
+						
+						case 1:
+							if (thing[g].turning == true) {
+								if (--thing[g].animate == 0) {
+									thing[g].turning = false;
+								}
+							}
+							else {
+								if (thing[g].dir == true) {				//Facing left?
+									thing[g].xPos -= 2;
+									if (thing[g].xPos <= 55) {
+										thing[g].dir = false;			//Turn right
+										thing[g].turning = true;
+										thing[g].animate = 4;
+									}				
+								}
+								else {
+									thing[g].xPos += 2;
+									if (thing[g].xPos >= 1104) {
+										thing[g].dir = true;
+										thing[g].turning = true;
+										thing[g].animate = 4;
+									}					
+								}			
+							}
+							
+							if (chandelierFalling == true) {				//Danger Will Robinson!
+								//Only 1 can fall at once. Pass its XY wide high to the robot and see if collision
+								if (thing[g].hitBox(thing[cWF].xPos, thing[cWF].yPos, thing[cWF].xPos + 32, thing[cWF].yPos + 24) == true) {
+									thing[cWF].state = 3;				//Set chandelier to "falling + hit robot" so it won't generate more sound								
+									thing[g].state = 9;
+									thing[g].subAnimate = 0;
+									thing[g].animate = 0;
+									playAudio("audio/hitModem.wav");
+								}									
+							}					
+							
+						break;
+						
+						case 2:
+						
+						break;
+						
+					}
+			
+				
 					break;
 				
 				case greenie:
@@ -1225,14 +1405,15 @@ void thingLogic() {
 					
 						case 1:											//Still installed
 							if (thing[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {
-								thing[g].state = 2;
+								thing[g].state = 2;						//Falling no robot hit
 								chandelierFalling = true;
 								cWF = g;								//Index of which one is falling
 								playAudio("audio/glass_loose.wav");
 							}							
 							break;
-							
-						case 2:											//Falling
+						
+						case 2:											//Falling 
+						case 3:											//Falling after hitting robot (no SFX when land)
 							thing[g].yPos += thing[g].animate;							
 							if (thing[g].animate < 8) {
 								thing[g].animate++;
@@ -1241,7 +1422,9 @@ void thingLogic() {
 								thing[g].yPos = 103;
 								thing[g].type = chandelierSmashed;
 								chandelierFalling = false;
-								playAudio("audio/glass_2.wav");	
+								if (thing[g].state == 2) {				//Only play big crash if we didn't hit robot (so we don't override its sound)
+									playAudio("audio/glass_2.wav");
+								}
 							}
 							break;	
 					}

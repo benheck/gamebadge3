@@ -29,8 +29,10 @@ class thingObject
 	int16_t yPos;
 	uint8_t width = 1;
 	uint8_t height = 1;
-	uint8_t dir = 0;
-	uint8_t animate = 3;
+	bool dir = false;							//False = facing right (not flipped) Sprites should be drawn facing right as default
+	
+	bool turning;
+	uint8_t animate = 0;
 	uint8_t subAnimate = 0;
 
 	

@@ -10,9 +10,24 @@ void thingObject::scan(uint16_t worldX, uint16_t worldY) {
 
 	visible = false;
 
-	int width = 24;
+	int width = 16;
 
-	if ((xPos + 24) < worldX) {				//Would object appear in window (left edge X + width of object)
+	if (state == 9) {						//Do animation state even if off-screen
+		
+		if (++subAnimate == 8) {
+			subAnimate = 0;
+			animate++;
+		}	
+		if (animate == 16) {
+			state = 1;
+			playAudio("audio/startup.wav");
+		}
+		
+	}
+
+	//OK now check if visible
+
+	if ((xPos + 16) < worldX) {				//Would object appear in window (left edge X + width of object)
 		return;								//If not, abort
 	}
 	
@@ -20,9 +35,35 @@ void thingObject::scan(uint16_t worldX, uint16_t worldY) {
 		return;								//Also abort
 	}
 
-	//OK object must in the window
-	drawSprite(xPos - worldX, yPos, 0, 32 + 10, 3, 6, 7, false, false);
+
+	switch(state) {
+		
+		case 1:
+			if (turning == false) {
+				drawSprite(xPos - worldX, yPos, 0, 32, 2, 6, 7, dir, false);
+			}
+			else {
+				drawSprite(xPos - worldX, yPos, 2, 32, 2, 6, 7, false, false);
+			}		
+		break;
+			
+		case 9:
+			if (animate < 8) {
+				drawSprite((xPos - worldX) + 4, yPos + 5, 6, 32, 1, 2, 7, false, false);						//X face
+			}
+			else {
+				if (animate < 16) {
+					drawSprite((xPos - worldX) + 4, yPos + 5, animate - 8, 32 + 6, 1, 2, 7, false, false);		//Reboot progress bar
+				}
+			}
+				
+			drawSprite(xPos - worldX, yPos, 4, 32, 2, 3, 7, false, false);			//Draw blank face
+			drawSprite(xPos - worldX, yPos + 24, 2, 32 + 3, 2, 3, 7, false, false);	//Draw body
 	
+		break;
+		
+	}
+
 	visible = true;
 	
 }
@@ -48,14 +89,14 @@ void thingObject::scanG(uint16_t worldX, uint16_t worldY) {
 
 	if (++subAnimate == 3) {
 		subAnimate = 0;
-		if (dir == 0) {
+		if (dir == true) {
 			if (++animate == 7) {
-				dir = 1;
+				dir = false;
 			}
 		}
 		else {
 			if (--animate == 3) {
-				dir = 0;
+				dir = true;
 			}				
 		}			
 	}
