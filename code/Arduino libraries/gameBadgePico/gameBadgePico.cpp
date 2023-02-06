@@ -344,9 +344,27 @@ void drawTile(int tileX, int tileY, uint16_t patternX, uint16_t patternY, char w
 void setTileType(int tileX, int tileY, int flags) {						
 	
 	flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
+	
+	nameTable[tileY][tileX] &= 0x07FF;				//AND off the top 5 bits
+	
 	nameTable[tileY][tileX] |= (flags << 8);		//OR it into the tile in nametable
 	
 }
+
+
+void setTilePalette(int tileX, int tileY, int whatPalette) {	
+
+	whatPalette <<= 8;				//Bitshift it over
+	
+	whatPalette &= 0x0300;			//Ensure it won't overwrite anything else
+		
+	nameTable[tileY][tileX] &= 0xF8FF;		//Erase those 3 bits from the tile attb
+	
+	nameTable[tileY][tileX] |= whatPalette;	//OR in new color
+
+
+}
+
 
 //Retrieves the flags set by the function above (bit-shifted back into the low byte) Use this to detect collisions, spikes and stuff
 int getTileType(int tileX, int tileY) {
@@ -355,6 +373,12 @@ int getTileType(int tileX, int tileY) {
 	
 }
 
+//Retrieves the value of the tile itself. Use this to pull text from the screen like password entry
+int getTileValue(int tileX, int tileY) {
+	
+	return nameTable[tileY][tileX] & 0xFF;			//Lob off top, return lower byte
+	
+}
 
 //Used to fill or clear a large amount of tiles (should do on boot in case garbage in RAM though in theory arrays should boot at 0's)
 void fillTiles(int startX, int startY, int endX, int endY, uint16_t whatTile, char whatPalette) {

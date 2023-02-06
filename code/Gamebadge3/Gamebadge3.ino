@@ -2,10 +2,16 @@
 #include "thingObject.h"
 //Your defines here------------------------------------
 #include "hardware/pwm.h"
+#include <WiFi.h>
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
-bool paused = true;						//Player pause, also you can set pause=true to pause the display while loading files
+bool wifiConnected = false;
+int wifiPower = 0;
+
+bool displayPause = true;
+
+bool paused = true;							//Player pause, also you can set pause=true to pause the display while loading files/between levels
 bool nextFrameFlag = false;					//The 30Hz IRS sets this flag, Core0 Loop responds to it
 bool drawFrameFlag = false;					//When Core0 Loop responses to nextFrameFlag, it sets this flag so Core1 will know to render a frame
 bool frameDrawing = false;					//Set TRUE when Core1 is drawing the display. Core0 should wait for this to clear before accessing video memory
@@ -99,88 +105,49 @@ int totalThings = 0;
 int lastRemoved = 0xFF;
 int lastAdded = 0xFF;
 
+bool gameActive = false;
+bool isDrawn = false;													//Flag that tells new state it needs to draw itself before running logic
+
+enum stateMachine { bootingMenu, splashScreen, mainMenu, wifiMode, passwordEntry, login, gameRunning };		//State machine of the badge (boot, wifi etc)
+stateMachine badgeState = bootingMenu;
+
+enum stateMachineGame { bootingGame, titleScreen, game };					//State machine of the game (under stateMachine = game)
+stateMachineGame gameState = bootingGame;
+
+uint16_t menuTimer;
+
+uint8_t cursorX, cursorY, cursorAnimate;
+
+uint8_t soundTimer = 0;
+
+int networksFound = 0;
+
+uint8_t passChar[3];
+
+uint8_t passCharStart[3] = { 32, 64, 96 };
+uint8_t passCharEnd[3] = { 63, 95, 127 };
+
+char ssidString[32];
+char passwordString[32];
+int passwordCharEdit = 0;
+
+WiFiMulti multi;
+
+const char* ssid = "Wireless Hub #42";
+const char* password = "BAD42FAB42";
 
 void setup() { //------------------------Core0 handles the file system and game logic
 
-	gamebadge3init();
+	gamebadge3init();						//Init system
 
-	if (loadRGB("NEStari.pal")) {
-		//loadRGB("NEStari.pal");                		//Load RGB color selection table. This needs to be done before loading/change palette
-		//loadPalette("palette_0.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-		//loadPattern("moon_force.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+	menuTimer = 0;
 
-		loadPalette("bud.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-		loadPattern("bud.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-		//loadPattern("patterns/basefont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-		paused = false;   							//Allow core 2 to draw once loaded
-	}
-
-	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
-	
-	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
-	
-	drawHallway(1);
+	add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
 
 }
 
-void setup1() { //-----------------------Core 1 handles the graphics stuff
+void setup1() { //-----------------------Core 1 builds the tile display and sends it to the LCD
   
-  while (paused == true) {
-	  delayMicroseconds(1);
-  }
-
-  int tileG = 0;
-  
-  // for (int y = 0 ; y < 16 ; y++) {  
-  
-    // for (int x = 0 ; x < 16 ; x++) {  
-      // drawTile(x, y, tileG++ & 0xFF, y & 0x03);
-    // } 
-     // for (int x = 16 ; x < 32 ; x++) {  
-      // drawTile(x, y, 'A', 0);
-    // }
-     
-  // } 
-  
-  // tileG = 0;
-  
-   // for (int y = 16 ; y < 32 ; y++) {  
-  
-    // for (int x = 0 ; x < 16 ; x++) {  
-      // drawTile(x, y, tileG++ & 0xFF, y & 0x03);
-    // } 
-     // for (int x = 16 ; x < 32 ; x++) {  
-      // drawTile(x, y, 'B', 0);
-    // }
-     
-  // }  
-  
-
-  // for (int x = 0 ; x < 15 ; x++) {  
-    // drawTile(x, 30, 10, 0x03);
-  // } 
-  // for (int x = 0 ; x < 15 ; x++) {  
-    // drawTile(x, 31, 15, 0x03);
-  // } 
- 
-  //fillTiles(0, 0, 31, 31, 0, 0);
-  
-  // for (int x = 0 ; x < 32 ; x += 2) {
-	  // drawTile(x, 13, 2, 0, 3);
-	  // drawTile(x + 1, 13, 3, 0, 3);
-	  // drawTile(x, 14, 2, 1, 3);
-	  // drawTile(x + 1, 14, 3, 1, 3);	  
-  // }
-
-  //setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
-
-  //setWinYjump(0x80, 13, 30);	//On row 13, jump to tilemap row 30 (such as for a status window)
-  //setWinYjump(0x80, 14, 31); 	//On row 14, jump to tilemap row 31. Both of these rows will be set to "no scroll"
-
-  add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);
-
 }
 
 void loop() {	//-----------------------Core 0 handles the main logic loop
@@ -188,11 +155,18 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 	if (nextFrameFlag == true) {		//Flag from the 30Hz ISR?
 		nextFrameFlag = false;			//Clear that flag		
 		drawFrameFlag = true;			//and set the flag that tells Core1 to draw the LCD
-		gameFrame();					//Now do our game logic in Core0
+
+		if (gameActive == true) {
+			gameFrame();				//Now do our game logic in Core0			
+		}
+		else {
+			menuFrame();				//Or menu logic
+		}
+			
 		serviceDebounce();				//Debounce buttons
 	}
 
-	if (paused == false) {   
+	if (displayPause == false) {   
 		if (button(start_but)) {      //Button pressed?
 		  paused = true;
 		  Serial.println("PAUSED");
@@ -200,7 +174,7 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 	}
 	else {
 		if (button(start_but)) {      //Button pressed?
-		  paused = false;
+		  displayPause = false;
 		  Serial.println("UNPAUSED");
 		}    
 	}
@@ -214,38 +188,505 @@ void loop1() { //------------------------Core 1 handles the graphics blitter. Co
 
 		drawFrameFlag = false;				//Clear flag
 		
-		if (paused == true) {				//If system paused, return (no draw)
+		if (displayPause == true) {			//If display is paused, don't draw (return)
 			return;
 		}		
 
 		frameDrawing = true;				//Set flag that we're drawing a frame. Core0 should avoid accessing video memory if this flag is TRUE
-		sendFrame();
+		sendFrame();						//Render the sprite-tile frame and send to LCD via DMA
 		frameDrawing = false;				//Clear flag. Core0 is now free to access screen memory (I guess this core could as well?)
 
 	}
 
 }
 
+
+void menuFrame() {		//This is called 30 times a second. It either calls the main top menu state machine or the game state machine
+
+	if (displayPause == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
+		
+		while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
+			delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
+		}
+		//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
+	
+		serviceAudio();
+		
+		//Controls, file access, Wifi etc...
+		
+		while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
+			delayMicroseconds(1);
+		}
+		//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
+	}
+
+	switch(badgeState) {
+	
+		case bootingMenu:
+			if (menuTimer > 0) {					//If timer active, decrement
+				--menuTimer;
+			}
+			
+			if (menuTimer == 0) {					//First boot, or did timer reach 0?
+				if (loadRGB("NEStari.pal")) {					//Try and load master pallete from root dir
+					//Load success? Load the rest
+					loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
+					loadPattern("UI/logofont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
+					switchMenuTo(splashScreen);					//Progress to splashscreen					
+				}
+				else {
+					menuTimer = 30;					//Try again in 1 second
+				}							
+			}
+
+			break;
+			
+		case splashScreen:
+			if (isDrawn == false) {
+				drawSplashScreen();
+			}	
+			if (--menuTimer == 0) {					//Dec timer and goto main menu after timeout
+				fillTiles(0, 0, 14, 14, 0, 3);
+				loadPattern("UI/baseFont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+				switchMenuTo(mainMenu);
+			}
+			break;
+			
+			
+		case mainMenu:
+			if (isDrawn == false) {
+				drawMainMenu();
+			}	
+			if (wifiConnected == true) {						//Update Wifi status
+				drawTile(13, 0, 0x09, 3, 0);					//On/off
+			}
+			else {
+				drawTile(13, 0, 0x20, 3, 0);
+			}
+			drawTile(14, 0, 0x0A + wifiPower, 3, 0);			//Power
+
+			if (++menuTimer > 3) {
+				menuTimer = 0;
+				cursorAnimate += 0x10;
+				if (cursorAnimate > 0x20) {
+					cursorAnimate = 0x02;
+				}
+			}
+			
+			fillTiles(cursorX, 4, cursorX, 8, ' ', 3);
+			
+			drawTile(cursorX, cursorY, cursorAnimate, 3, 0);			//Animated arrow
+
+			if (button(up_but)) {
+				if (cursorY > 4) {
+					cursorY--;
+					pwm_set_freq_duty(6, 493, 25);
+					soundTimer = 10;
+				}				
+			}
+			if (button(down_but)) {
+				if (cursorY < 8) {
+					cursorY++;
+					pwm_set_freq_duty(6, 520, 25);
+					soundTimer = 10;
+				}				
+			}
+			
+			if (button(A_but)) {
+			
+				switch(cursorY) {
+						
+					case 4:
+						switchMenuTo(wifiMode);
+					break;
+					
+					case 5:
+						paused = true;
+						setupHallway();
+						gameActive = true;
+					break;
+					
+				}
+			
+				
+			}
+			
+
+			break;
+			
+		case wifiMode:
+			if (isDrawn == false) {
+				drawWifiScreen();
+			}		
+
+			if (++menuTimer > 3) {
+				menuTimer = 0;
+				cursorAnimate += 0x10;
+				if (cursorAnimate > 0x20) {
+					cursorAnimate = 0x02;
+				}
+			}
+			
+			fillTiles(0, 1, 0, 13, ' ', 3);						//Erase arrows
+			
+			drawTile(0, cursorY, cursorAnimate, 0, 0);			//Animated arrow
+
+			if (button(up_but)) {
+				if (cursorY > 1) {
+					cursorY--;
+					pwm_set_freq_duty(6, 493, 25);
+					soundTimer = 10;
+				}				
+			}
+			if (button(down_but)) {
+				if (cursorY < (networksFound)) {
+					cursorY++;
+					pwm_set_freq_duty(6, 520, 25);
+					soundTimer = 10;
+				}				
+			}
+
+
+			if (button(A_but)) {	
+				for (int x = 2 ;  x < 31 ; x++) {
+					
+					char theChar = getTileValue(x, cursorY);
+					
+					if (theChar == 0x04) {
+						break;
+					}
+					ssidString[x - 2] = theChar;							//Scan the chars into the SSID string
+					ssidString[x - 1] = 0;									//Add zero terminator
+					
+				}
+
+			
+				switchMenuTo(passwordEntry);					
+			}
+	
+			if (button(B_but)) {	
+				switchMenuTo(mainMenu);					
+			}
+	
+			break;
+			
+		case passwordEntry:
+			if (isDrawn == false) {
+				drawPasswordEntry();
+			}		
+
+			for (int sel = 0 ; sel < 3 ; sel++) {
+			
+				uint8_t which = passChar[sel];
+			
+				for (int x = 0 ; x < 15 ; x++) {
+				
+					drawTile(x, 7 + (sel * 2), which, 2, 0);
+					
+					if (++which > passCharEnd[sel]) {
+						which = passCharStart[sel];
+					}				
+					
+				}
+
+			
+			}
+			setTilePalette(6, 7, 3);
+			setTilePalette(6, 9, 3);
+			setTilePalette(6, 11, 3);
+
+			for (int x = 0 ; x < passwordCharEdit ; x++) {			
+				drawTile(x, 3, passwordString[x], 3, 0);			
+			}
+			
+			menuTimer++;
+			
+			if (menuTimer & 0x08) {
+				drawTile(passwordCharEdit, 3, '_', 3, 0);
+			}
+			else {
+				drawTile(passwordCharEdit, 3, ' ', 3, 0);
+			}
+
+			if (button(A_but)) {
+				passwordString[passwordCharEdit++] = getTileValue(6, 7);
+				passwordString[passwordCharEdit] = 0;	
+			}
+			if (button(B_but)) {
+				passwordString[passwordCharEdit++] = getTileValue(6, 9);	
+				passwordString[passwordCharEdit] = 0;		
+			}			
+			if (button(C_but)) {
+				passwordString[passwordCharEdit++] = getTileValue(6, 11);
+				passwordString[passwordCharEdit] = 0;	
+			}		
+
+			if (button(select_but)) {	
+				switchMenuTo(login);
+			}	
+			
+			if (button(up_but)) {	
+				if (passwordCharEdit > 0) {
+					passCharStart[passwordCharEdit] = 0;				//Erase zero terminate
+					drawTile(passwordCharEdit, 3, ' ', 3, 0);	
+					passwordCharEdit--;					
+				}
+			}	
+			
+			if (button(left_but)) {					
+				for (int sel = 0 ; sel < 3 ; sel++) {
+					if (--passChar[sel] < passCharStart[sel]) {
+						passChar[sel] = passCharEnd[sel];
+					}
+				}		
+			}	
+			
+			if (button(right_but)) {		
+				for (int sel = 0 ; sel < 3 ; sel++) {
+					if (++passChar[sel] > passCharEnd[sel]) {
+						passChar[sel] = passCharStart[sel];
+					}
+				}				
+			}
+		
+			break;			
+			
+			
+		case login:
+			if (isDrawn == false) {
+				drawLoginScreen();
+			}
+			
+			if (wifiConnected == false) {
+				
+				if (++menuTimer == 30) {
+					menuTimer = 0;
+					if (multi.run() == WL_CONNECTED) {
+						drawText("SUCCESS!", 0, 5, false);	
+						wifiConnected = true;
+					}
+					else {
+						drawText("FAIL!", 0, 5, false);
+					}								
+				}			
+				
+			}
+			
+			if (button(B_but)) {
+				switchMenuTo(mainMenu);		
+			}	
+			
+			break;
+			
+		case gameRunning:
+			//Transition to game
+			break;
+		
+		
+	}
+	
+	if (soundTimer > 0) {
+		if (--soundTimer == 0) {
+			pwm_set_freq_duty(6, 0, 0);
+		}
+	}
+
+}
+
+void switchMenuTo(stateMachine x) {		//Switches state of menu
+
+	displayPause = true;
+	badgeState = x;		
+	isDrawn = false;
+	
+}
+
+
+void drawSplashScreen() {
+
+	fillTiles(0, 0, 14, 14, 0, 3);
+	
+	for (int y = 0 ; y < 7 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y, x, y, 0, 0);
+		}		
+	}
+	
+	for (int y = 0 ; y < 3 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y + 8, x, y + 8, 1, 0);
+		}		
+	}	
+	
+	for (int y = 0 ; y < 2 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y + 12, x, y + 11, 3, 0);
+		}		
+	}		
+
+	setWindow(0, 0);
+	menuTimer = 60;					//Splash Screen for 2 second
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;
+	
+	playAudio("gameBadge.wav");		//Splash audio
+	
+}
+
+void drawMainMenu() {
+
+	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
+	
+	drawText("MAIN MENU", 0, 0, false);
+
+	drawText("Connect WIFI", 2, 4, false);
+	drawText("Run GAME", 2, 5, false);
+	
+	drawText("A=SELECT", 0, 14, false);
+
+	cursorX = 1;
+	cursorY = 4;
+	cursorAnimate = 0x02;
+	menuTimer = 0;
+	
+	setWindow(0, 0);
+
+	setButtonDebounce(up_but, true, 1);			//Set debounce on d-pad for menu select
+	setButtonDebounce(down_but, true, 1);
+	setButtonDebounce(left_but, true, 1);
+	setButtonDebounce(right_but, true, 1);
+	
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;
+	
+}
+
+void drawWifiScreen() {
+	
+	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
+	
+	cursorX = 1;
+	cursorY = 1;
+	cursorAnimate = 0x02;
+	menuTimer = 0;	
+
+	int y = 1;
+
+	auto cnt = WiFi.scanNetworks();
+	
+	networksFound = 0;
+	
+	if (!cnt) {
+		drawText("NO NETWORKS", 0, 0, false);
+	}
+	else {
+		drawText("NETWORKS:", 0, 0, false);
+		drawDecimal(cnt, 10, 0);
+
+		for (auto i = 0; i < cnt; i++) {
+			uint8_t bssid[6];
+			WiFi.BSSID(i, bssid);
+			//Serial.printf("%32s %5s %17s %2d %4d\n", WiFi.SSID(i), encToString(WiFi.encryptionType(i)), macToString(bssid), WiFi.channel(i), WiFi.RSSI(i));
+			fillTiles(1, y, 31, y, 0x04, 3);
+			drawText(WiFi.SSID(i), 2, y, false);
+			drawTile(1, y, rssiToIcon(WiFi.RSSI(i)), 3, 0);			//Draw strength
+			networksFound++;
+			y++;		  
+		}
+	}
+	
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;
+	
+}
+
+void drawPasswordEntry() {
+	
+	fillTiles(0, 0, 14, 14, ' ', 2);			//CLS
+	
+	drawText(ssidString, 0, 0, false);
+	drawText("Enter password:", 0, 1, false);
+	
+	drawText("UP=backspace", 0, 5, false);
+		
+	drawTile(6, 8, 0, 0, 0);
+	drawText("-A press", 7, 8, false);	
+
+	drawTile(6, 10, 0, 0, 0);
+	drawText("-B press", 7, 10, false);
+
+	drawTile(6, 12, 0, 0, 0);
+	drawText("-C press", 7, 12, false);
+	
+	drawText("SELECT=login", 2, 14, false);
+
+	
+	passChar[0] = 32;
+	passChar[1] = 64;
+	passChar[2] = 96;
+	
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;
+	
+}
+
+void drawLoginScreen() {
+	
+	fillTiles(0, 0, 14, 14, ' ', 2);			//CLS
+	
+	drawText("Connecting to:", 0, 0, false);	
+	drawText(ssidString, 0, 1, false);
+	drawText("Password:", 0, 2, false);	
+	drawText(passwordString, 0, 3, false);
+
+	multi.addAP(ssid, password);
+	
+	menuTimer = 0;
+	
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;		
+
+}
+
+int rssiToIcon(int level) {
+	
+	if (level < -100) {
+		return 0x0A;				//Connected but BAD
+	}
+
+	int value = (level - (-100));		//Invert and get delta
+	
+	value /= 10;						//Divide by 10
+
+	value += 0x0B;						//Add to char map
+	
+	if (value > 0x0F) {					//Max bars
+		value = 0x0F;
+	}
+	
+	return value;
+	
+}
+
+
 void gameFrame() { //--------------------This is called at 30Hz. Your main game state machine should reside here
 
-	if (paused == true) {
-		return;
+	if (displayPause == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
+		
+		while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
+			delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
+		}
+		//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
+	
+		serviceAudio();
+		
+		//Controls, file access, Wifi etc...
+		
+		while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
+			delayMicroseconds(1);
+		}
+		//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 	}
-	
-	while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
-		delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
-	}
-	//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
-	
-	serviceAudio();
-	
-	//Controls, file access, Wifi etc...
-	
-	while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
-		delayMicroseconds(1);
-	}
-
-	//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
 	
@@ -615,6 +1056,45 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
 
 
+}
+
+void switchMenuTo(stateMachineGame x) {		//Switches state of menu
+
+	gameState = x;		
+	isDrawn = false;
+	
+}
+
+
+
+void setupHallway() {
+
+	displayPause = true;   		//Allow core 2 to draw
+
+	if (loadRGB("NEStari.pal")) {
+		//loadRGB("NEStari.pal");                		//Load RGB color selection table. This needs to be done before loading/change palette
+		//loadPalette("palette_0.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+		//loadPattern("moon_force.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+
+		loadPalette("bud.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+		loadPattern("bud.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+
+		//loadPattern("patterns/basefont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+
+		paused = false;   							//Allow core 2 to draw once loaded
+	}
+
+	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
+	setButtonDebounce(down_but, false, 0);
+	setButtonDebounce(left_but, false, 0);
+	setButtonDebounce(right_but, false, 0);
+	
+	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+	
+	drawHallway(1);	
+	
+	displayPause = false;   		//Allow core 2 to draw
+	
 }
 
 void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {

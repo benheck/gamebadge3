@@ -32,7 +32,9 @@
 	void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags = 0x00);
 	void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette, int flags = 0x00);
 	void setTileType(int tileX, int tileY, int flags);
+	void setTilePalette(int tileX, int tileY, int whatPalette);
 	int getTileType(int tileX, int tileY);
+	int getTileValue(int tileX, int tileY);
 	void fillTiles(int startX, int startY, int endX, int endY, uint16_t whatTile, char whatPalette);
 	void fillTiles(int startX, int startY, int endX, int endY, uint16_t patternX, uint16_t patternY, char whatPalette);
 	void setASCIIbase(uint16_t whatBase);
@@ -74,12 +76,6 @@
 	// #define down_but			11
 	// #define left_but			9
 	// #define right_but		13
-	
-	//Old
-	// #define up_but 			6
-	// #define down_but			8
-	// #define left_but			7
-	// #define right_but		9
 	
 	//Buttons to index #: (these are the defines your game will use)
 	#define up_but 			0
