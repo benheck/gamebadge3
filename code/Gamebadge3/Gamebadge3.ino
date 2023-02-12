@@ -9,6 +9,7 @@ struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 bool wifiConnected = false;
 int wifiPower = 0;
 
+bool firstFrame = false;
 bool displayPause = true;
 
 bool paused = true;							//Player pause, also you can set pause=true to pause the display while loading files/between levels
@@ -20,8 +21,6 @@ bool frameDrawing = false;					//Set TRUE when Core1 is drawing the display. Cor
 int xPos = 0;
 int yPos = 0;
 int dir = 0;
-
-
 
 int dutyOut;
 
@@ -111,10 +110,11 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen, mainMenu, wifiMode, passwordEntry, login, gameRunning };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { bootingGame, titleScreen, game };					//State machine of the game (under stateMachine = game)
-stateMachineGame gameState = bootingGame;
+enum stateMachineGame { titleScreen, titleScreen2, game };					//State machine of the game (under stateMachine = game)
+stateMachineGame gameState = titleScreen;
 
 uint16_t menuTimer;
+uint8_t cursorTimer;
 
 uint8_t cursorX, cursorY, cursorAnimate;
 
@@ -168,7 +168,7 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 
 	if (displayPause == false) {   
 		if (button(start_but)) {      //Button pressed?
-		  paused = true;
+		  displayPause = true;
 		  Serial.println("PAUSED");
 		}      
 	}
@@ -222,7 +222,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 
 	switch(badgeState) {
 	
-		case bootingMenu:
+		case bootingMenu:							//Special type of load that handles files not being present yet
 			if (menuTimer > 0) {					//If timer active, decrement
 				--menuTimer;
 			}
@@ -294,21 +294,15 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 			
 			if (button(A_but)) {
 			
-				switch(cursorY) {
-						
+				switch(cursorY) {						
 					case 4:
 						switchMenuTo(wifiMode);
 					break;
 					
 					case 5:
-						paused = true;
-						setupHallway();
-						gameActive = true;
-					break;
-					
-				}
-			
-				
+						switchGameTo(titleScreen);												
+					break;				
+				}	
 			}
 			
 
@@ -495,6 +489,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 
 void switchMenuTo(stateMachine x) {		//Switches state of menu
 
+	gameActive = false;
 	displayPause = true;
 	badgeState = x;		
 	isDrawn = false;
@@ -669,8 +664,8 @@ int rssiToIcon(int level) {
 }
 
 
-void gameFrame() { //--------------------This is called at 30Hz. Your main game state machine should reside here
-
+void gameFrame() {
+	
 	if (displayPause == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
 		
 		while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
@@ -687,6 +682,177 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 		}
 		//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
 	}
+
+	switch(gameState) {
+				
+		case titleScreen:
+			if (isDrawn == false) {
+				drawTitleScreen();
+			}	
+			
+			menuTimer--;
+			
+			if (menuTimer == 20) {						//Bud blinks
+				// drawTile(2, 4, 8, 13, 4, 0);
+				// drawTile(3, 4, 9, 14, 4, 0);
+				// drawTile(2, 5, 8, 14, 4, 0);
+				// drawTile(3, 5, 9, 14, 4, 0);
+				
+				// drawTile(5, 3, 10, 13, 4, 0);
+				// drawTile(6, 3, 11, 14, 4, 0);
+				// drawTile(5, 4, 10, 14, 4, 0);
+				// drawTile(6, 4, 11, 14, 4, 0);
+				
+			}
+			
+			if (menuTimer == 0) {						//Un-blink face in the lazier way possible
+				menuTimer = random(50, 150);
+			
+			}
+
+			if (++cursorTimer > 3) {
+				cursorTimer = 0;
+				cursorAnimate += 0x10;
+				if (cursorAnimate > 0x9F) {
+					cursorAnimate = 0x8A;
+				}
+			}
+			
+			fillTiles(cursorX, 10, cursorX, 11, '@', 0);					//Erase arrows
+			
+			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
+
+			if (button(up_but)) {
+				if (cursorY > 10) {
+					cursorY--;
+					pwm_set_freq_duty(6, 493, 25);
+					soundTimer = 10;
+				}				
+			}
+			if (button(down_but)) {
+				if (cursorY < 11) {
+					cursorY++;
+					pwm_set_freq_duty(6, 520, 25);
+					soundTimer = 10;
+				}				
+			}
+			
+			if (button(A_but)) {
+				menuTimer = 0;
+				//setupHallway();
+				
+				//gameState = game;
+				
+				switchGameTo(game);
+			}
+			
+			
+			//TIMER TO ATTRACT
+			//SELECT START
+		break;
+					
+		case game:
+			if (isDrawn == false) {
+				setupHallway();
+			}	
+			gameLogic();
+		break;
+		
+		
+	}
+	
+	if (soundTimer > 0) {
+		if (--soundTimer == 0) {
+			pwm_set_freq_duty(6, 0, 0);
+		}
+	}
+
+	
+}
+
+void switchGameTo(stateMachineGame x) {		//Switches state of game
+
+	gameActive = true;
+	displayPause = true;
+	gameState = x;		
+	isDrawn = false;
+	
+}
+
+void startBoss(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
+
+	budFrame = 0;
+	budSubFrame = 0;
+	budDir = false;											//True = going left
+
+	budX = budStartCoarseX * 8;
+	budY = budStartFineY;
+
+	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
+	budWorldY = budStartFineY;
+
+	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
+	worldY = 0;
+
+	xWindowFine = 0;						//The fine scrolling amount
+	xWindowCoarse = 6; //windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
+	xWindowBudFine = 0;
+	
+	xWindowCoarseTile = windowStartCoarseX + budStartCoarseX;		//Where Bud is (on center of screen, needs to be dynamic)
+	
+	xStripLeft = 0;				    //Strip redraw position on left (when moving left)
+	xStripRight = 26;					//Strip redraw position on right (when moving right)
+
+	xLevelStripLeft = windowStartCoarseX - 6;					//0		//Strip redraw position on left (when moving left)
+	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
+	xLevelStripRight = windowStartCoarseX + 20;			//Strip redraw position on right (when moving right)
+
+	//xStripLeft = xLevelStripLeft & 0x1F;			//Keep remainder
+	//xStripRight = xLevelStripRight & 0x1F;
+
+
+}
+
+void drawTitleScreen() {
+
+	loadPalette("title/title_0.dat");                //Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("title/title_0.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
+
+	fillTiles(0, 0, 14, 14, '@', 3);					//Clear screen
+	
+	for (int y = 0 ; y < 6 ; y++) {				//Draw GAME TITLE
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y, x, y, 1, 0);
+		}		
+	}	
+	
+	
+	for (int y = 8 ; y < 16 ; y++) {				//Draw BUD FACE in palette 4
+		for (int x = 0 ; x < 8 ; x++) {		
+			drawTile(x, y - 1, x, y, 4, 0);
+		}		
+	}
+
+
+	drawText("start", 10, 10, false);
+	drawText("load", 10, 11, false);	
+
+
+	setWindow(0, 0);
+	
+	menuTimer = random(50, 150);
+	cursorTimer = 0;
+	cursorX = 9;
+	cursorY = 10;
+	cursorAnimate = 0x8A;
+					
+	isDrawn = true;	
+	displayPause = false;
+	
+}
+
+
+void gameLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
 
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
 	
@@ -1044,10 +1210,11 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 	
 	//drawSpriteText("GAME OVAH", 16, 16, 3);
 	
-	drawSpriteDecimal(budWorldX >> 3, 10, 0, 0);		
-	drawSpriteDecimal(budWorldX, 10, 8, 0);
-	drawSpriteDecimal(budWorldY, 10, 16, 0);	
-	drawSpriteDecimal(totalThings, 10, 24, 0);
+	drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
+	drawSpriteDecimal(budWorldX >> 3, 10, 8, 0);		
+	drawSpriteDecimal(budWorldX, 10, 16, 0);
+	drawSpriteDecimal(budWorldY, 10, 24, 0);	
+	
 
 	
 	// drawSpriteDecimal(budX, 8, 0, 0);		
@@ -1058,31 +1225,10 @@ void gameFrame() { //--------------------This is called at 30Hz. Your main game 
 
 }
 
-void switchMenuTo(stateMachineGame x) {		//Switches state of menu
-
-	gameState = x;		
-	isDrawn = false;
-	
-}
-
-
-
 void setupHallway() {
 
-	displayPause = true;   		//Allow core 2 to draw
-
-	if (loadRGB("NEStari.pal")) {
-		//loadRGB("NEStari.pal");                		//Load RGB color selection table. This needs to be done before loading/change palette
-		//loadPalette("palette_0.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-		//loadPattern("moon_force.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-		loadPalette("bud.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-		loadPattern("bud.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-		//loadPattern("patterns/basefont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-		paused = false;   							//Allow core 2 to draw once loaded
-	}
+	loadPalette("bud.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("bud.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
 
 	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
 	setButtonDebounce(down_but, false, 0);
@@ -1090,10 +1236,13 @@ void setupHallway() {
 	setButtonDebounce(right_but, false, 0);
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+	startBoss(6, 6, 8);
 	
 	drawHallway(1);	
-	
+
 	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
 	
 }
 
@@ -1374,19 +1523,6 @@ void drawHallway(int floor) {
 
 }
 
-void redrawCurrentHallway() {
-	
-	xStripDrawing = xStripLeft;					
-
-	for (int x = xLevelStripLeft ; x < (xLevelStripRight + 1) ; x++) {
-		drawHallwayTiles(x);
-		if (++xStripDrawing > 31) {
-			xStripDrawing = 0;
-		}
-	}	
-	
-}
-
 void populateDoor(uint16_t levelStrip, int whichDoorNum, bool doorState) {
 
 	char stripCount = 0;
@@ -1415,6 +1551,18 @@ void populateObject(uint16_t levelStrip, char whichObject, char numStrips) {
 	
 }
 
+void redrawCurrentHallway() {
+	
+	xStripDrawing = xStripLeft;					
+
+	for (int x = xLevelStripLeft ; x < (xLevelStripRight + 1) ; x++) {
+		drawHallwayTiles(x);
+		if (++xStripDrawing > 31) {
+			xStripDrawing = 0;
+		}
+	}	
+	
+}
 
 void drawHallwayTiles(uint16_t levelStrip) {
 
