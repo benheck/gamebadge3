@@ -14,6 +14,8 @@ class thingObject
 	
 	void scanC1(uint16_t worldX, uint16_t worldY);
 	void scanC2(uint16_t worldX, uint16_t worldY);
+	void scanC3(uint16_t worldX, uint16_t worldY);
+	void scanC4(uint16_t worldX, uint16_t worldY);
 	
 	
 	void setPos(uint16_t atX, uint16_t atY);

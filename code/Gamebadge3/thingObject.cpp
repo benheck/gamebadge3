@@ -72,9 +72,7 @@ void thingObject::scanG(uint16_t worldX, uint16_t worldY) {
 
 	visible = false;
 
-	int width = 24;
-
-	if ((xPos + 24) < worldX) {				//Would object appear in window (left edge X + width of object)
+	if ((xPos + width) < worldX) {				//Would object appear in window (left edge X + width of object)
 		return;								//If not, abort
 	}
 	
@@ -145,6 +143,64 @@ void thingObject::scanC2(uint16_t worldX, uint16_t worldY) {
 
 }
 
+void thingObject::scanC3(uint16_t worldX, uint16_t worldY) {
+
+	visible = false;
+
+	if ((xPos + width) < worldX) {				//Would object appear in window (left edge X + width of object)
+		return;								//If not, abort
+	}
+	
+	if (xPos > (worldX + 119)) {			//Is object past right edge of window?
+		return;								//Also abort
+	}
+	
+	switch(state) {
+		
+		case 0:
+			drawSprite(xPos - worldX, yPos, 12, 32 + 4, 4, 3, 6, false, false);
+		break;
+			
+		case 1:
+			drawSprite(xPos - worldX, yPos, 8, 32 + 4, 4, 3, 6, false, false);	
+		break;
+		
+	}	
+	
+}	
+
+void thingObject::scanC4(uint16_t worldX, uint16_t worldY) {
+
+	visible = false;
+
+	if ((xPos + width) < worldX) {				//Would object appear in window (left edge X + width of object)
+		return;								//If not, abort
+	}
+	
+	if (xPos > (worldX + 119)) {			//Is object past right edge of window?
+		return;								//Also abort
+	}
+
+	yPos += 3;
+
+	if (yPos > 119) {
+		active = false;
+	}
+	
+	bool flipIt = true;
+	
+	if ((animate & 0x02) == 0x02) {
+		flipIt = false;
+	}
+
+	if ((++animate & 0x01) == 0x01) {
+		drawSprite(xPos - worldX, yPos, 8, 32, 4, 3, 6, flipIt, false);	
+	}
+
+	
+}	
+
+
 
 bool thingObject::hitBox(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {			//Check to see if Bud hit something bigger than himself
 
@@ -172,7 +228,7 @@ bool thingObject::hitBox(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {			//C
 		yMatch = true;
 	}
 	else {
-		return false;					//No match on X
+		return false;					//No match on Y
 	}
 
 	return true;
@@ -185,36 +241,15 @@ bool thingObject::hitBoxSmall(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {	
 		return false;
 	}
 
-	bool xMatch;
-	bool yMatch;
-
-	int x1Lap = xPos - x1;
-	int x2Lap = xPos - x2;	
-
-	if ((x1Lap > -1 && x1Lap < (x2 - x1)) || (x2Lap > -1 && x2Lap < (x2 - x1))) {
-		xMatch = true;
-	}
-	else {
-		return false;					//No match on X
+	if ((xPos < x1 && (xPos + width) < x1) || xPos > x2) {			//No match on X
+		return false;
 	}
 
-	int y1Lap = yPos - y1;
-	int y2Lap = yPos - y2;
-
-	if ((y1Lap > -1 && y1Lap < (y2 - y1)) || (y2Lap > -1 && y2Lap < (y2 - y1))) {
-		yMatch = true;
-	}
-	else {
-		return false;					//No match on X
+	if (yPos < y1 && (yPos + height) < y1 || yPos > y2) {			//No match on Y
+		return false;					
 	}
 
 	return true;
-
-	// if (xPos > x1 && xPos < x2 && yPos > y1 && yPos < y2) {		
-		// return true;
-	// }
-	
-	return false;
 
 }	
 

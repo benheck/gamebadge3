@@ -28,6 +28,9 @@ enum movement { rest, starting, walking, running, jumping, moving, turning, stop
 
 movement budState = rest;
 
+int entryWindow;
+int budSpawnTimer = 0;
+bool budSpawned = false;
 int budFrame = 0;
 int budSubFrame = 0;
 bool budDir = false;	//True = going left
@@ -57,7 +60,7 @@ uint16_t worldY = 0;
 int xWindowFine = 0;						//The fine scrolling amount
 int8_t xWindowCoarse = 6;				//In the tilemap, the left edge of the current positiom (coarse)
 int8_t xWindowBudFine = 0;
-int8_t xWindowCoarseTile = 6 + 7;		//Where Bud is (on center of screen, needs to be dynamic)
+int8_t xWindowBudToTile = 6 + 7;		//Where Bud is (on center of screen, needs to be dynamic)
 int8_t xStripLeft = 0;				    //Strip redraw position on left (when moving left)
 int8_t xStripRight = 26;					//Strip redraw position on right (when moving right)
 
@@ -69,14 +72,17 @@ uint16_t xLevelStripRight = 26;			//Strip redraw position on right (when moving 
 #define tilePlatform		0x80
 #define tileBlocked			0x40
 
-#define hallBlank		0
-#define hallCounter		2
-#define hallLeftWall	3
-#define hallRightWall	4
-#define hallElevator	5
-#define hallCallButton	6
-#define hallDoorClosed	10
-#define hallDoorOpen	11
+#define hallBlank				0
+#define hallCounterWindow		1
+#define hallCounter				2
+#define hallLeftWall			3
+#define hallRightWall			4
+#define hallElevator			5
+#define hallCallButton			6
+#define hallDoorClosed			10
+#define hallDoorOpen			11
+#define hallWindow				12
+#define hallGlass				13
 
 #define bigRobot			1
 #define chandelier			2
@@ -97,7 +103,7 @@ bool elevatorOpen = true;
 
 int inArrowFrame = 0;
 
-#define maxThings		64
+#define maxThings		128
 thingObject thing[maxThings];
 
 int totalThings = 0;
@@ -235,7 +241,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 					switchMenuTo(splashScreen);					//Progress to splashscreen					
 				}
 				else {
-					menuTimer = 30;					//Try again in 1 second
+					menuTimer = 30;					//Try again in 1 second. This gives user time to pause and load USB files
 				}							
 			}
 
@@ -246,8 +252,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 				drawSplashScreen();
 			}	
 			if (--menuTimer == 0) {					//Dec timer and goto main menu after timeout
-				fillTiles(0, 0, 14, 14, 0, 3);
-				loadPattern("UI/baseFont.nes", 0, 512);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+				fillTiles(0, 0, 14, 14, 0, 3);		
 				switchMenuTo(mainMenu);
 			}
 			break;
@@ -263,10 +268,11 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 			else {
 				drawTile(13, 0, 0x20, 3, 0);
 			}
+			
 			drawTile(14, 0, 0x0A + wifiPower, 3, 0);			//Power
 
-			if (++menuTimer > 3) {
-				menuTimer = 0;
+			if (++cursorTimer > 3) {
+				cursorTimer = 0;
 				cursorAnimate += 0x10;
 				if (cursorAnimate > 0x20) {
 					cursorAnimate = 0x02;
@@ -530,6 +536,9 @@ void drawSplashScreen() {
 
 void drawMainMenu() {
 
+	loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("UI/baseFont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+
 	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
 	
 	drawText("MAIN MENU", 0, 0, false);
@@ -542,8 +551,8 @@ void drawMainMenu() {
 	cursorX = 1;
 	cursorY = 4;
 	cursorAnimate = 0x02;
-	menuTimer = 0;
-	
+	cursorTimer = 0;
+
 	setWindow(0, 0);
 
 	setButtonDebounce(up_but, true, 1);			//Set debounce on d-pad for menu select
@@ -693,21 +702,26 @@ void gameFrame() {
 			menuTimer--;
 			
 			if (menuTimer == 20) {						//Bud blinks
-				// drawTile(2, 4, 8, 13, 4, 0);
-				// drawTile(3, 4, 9, 14, 4, 0);
-				// drawTile(2, 5, 8, 14, 4, 0);
-				// drawTile(3, 5, 9, 14, 4, 0);
+				drawTile(2, 11, 8, 14, 4, 0);
+				drawTile(3, 11, 9, 14, 4, 0);
+				drawTile(2, 12, 8, 15, 4, 0);
+				drawTile(3, 12, 9, 15, 4, 0);
 				
-				// drawTile(5, 3, 10, 13, 4, 0);
-				// drawTile(6, 3, 11, 14, 4, 0);
-				// drawTile(5, 4, 10, 14, 4, 0);
-				// drawTile(6, 4, 11, 14, 4, 0);
+				drawTile(5, 10, 10, 14, 4, 0);
+				drawTile(6, 10, 11, 14, 4, 0);
+				drawTile(5, 11, 10, 15, 4, 0);
+				drawTile(6, 11, 11, 15, 4, 0);
 				
 			}
 			
 			if (menuTimer == 0) {						//Un-blink face in the lazier way possible
 				menuTimer = random(50, 150);
-			
+				
+				for (int y = 8 ; y < 16 ; y++) {				//Draw BUD FACE in palette 4
+					for (int x = 0 ; x < 8 ; x++) {		
+						drawTile(x, y - 1, x, y, 4, 0);
+					}		
+				}			
 			}
 
 			if (++cursorTimer > 3) {
@@ -718,7 +732,7 @@ void gameFrame() {
 				}
 			}
 			
-			fillTiles(cursorX, 10, cursorX, 11, '@', 0);					//Erase arrows
+			fillTiles(cursorX, 10, cursorX, 12, '@', 0);					//Erase arrows
 			
 			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
@@ -730,7 +744,7 @@ void gameFrame() {
 				}				
 			}
 			if (button(down_but)) {
-				if (cursorY < 11) {
+				if (cursorY < 12) {
 					cursorY++;
 					pwm_set_freq_duty(6, 520, 25);
 					soundTimer = 10;
@@ -739,11 +753,23 @@ void gameFrame() {
 			
 			if (button(A_but)) {
 				menuTimer = 0;
-				//setupHallway();
+				switch(cursorY) {
+					
+					case 10:
+						switchGameTo(game);
+					break;
+					
+					case 11:
+					
+					break;
+					
+					case 12:
+						switchMenuTo(mainMenu);				
+					break;
+					
+				}
 				
-				//gameState = game;
 				
-				switchGameTo(game);
 			}
 			
 			
@@ -779,37 +805,37 @@ void switchGameTo(stateMachineGame x) {		//Switches state of game
 	
 }
 
-void startBoss(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
+void spawnIntoLevel(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
 
 	budFrame = 0;
 	budSubFrame = 0;
 	budDir = false;											//True = going left
 
-	budX = budStartCoarseX * 8;
+	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
 	budY = budStartFineY;
-
+	
 	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
 	budWorldY = budStartFineY;
+	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
 
 	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
 	worldY = 0;
 
-	xWindowFine = 0;						//The fine scrolling amount
-	xWindowCoarse = 6; //windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
-	xWindowBudFine = 0;
+	xWindowFine = 0;										//The fine scrolling amount
+	xWindowCoarse = windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
+	xWindowBudToTile = xWindowCoarse + (budStartCoarseX + 1);		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
+		
+	xStripLeft = xWindowCoarse - budStartCoarseX;	//6				//Set the left draw edge in the tilemap
 	
-	xWindowCoarseTile = windowStartCoarseX + budStartCoarseX;		//Where Bud is (on center of screen, needs to be dynamic)
+	if (xStripLeft < 0) {							//Handle negative rollover
+		xStripLeft += 32;
+	}
 	
-	xStripLeft = 0;				    //Strip redraw position on left (when moving left)
-	xStripRight = 26;					//Strip redraw position on right (when moving right)
-
-	xLevelStripLeft = windowStartCoarseX - 6;					//0		//Strip redraw position on left (when moving left)
+	xStripRight = ((xStripLeft + 26) & 0x1F);		//Compute right edge
+	
+	xLevelStripLeft = windowStartCoarseX - budStartCoarseX;		//Strip redraw position on left (when moving left)
 	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
-	xLevelStripRight = windowStartCoarseX + 20;			//Strip redraw position on right (when moving right)
-
-	//xStripLeft = xLevelStripLeft & 0x1F;			//Keep remainder
-	//xStripRight = xLevelStripRight & 0x1F;
-
+	xLevelStripRight = xLevelStripLeft + 26;	//6	//Strip redraw position on right (when moving right)
 
 }
 
@@ -836,7 +862,7 @@ void drawTitleScreen() {
 
 	drawText("start", 10, 10, false);
 	drawText("load", 10, 11, false);	
-
+	drawText("menu", 10, 12, false);
 
 	setWindow(0, 0);
 	
@@ -854,6 +880,67 @@ void drawTitleScreen() {
 
 void gameLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
 
+	if (budSpawned == true) {
+		budLogic();
+	}
+	else {
+		if (++budSpawnTimer == 20) {
+			budSpawned = true;
+			jump = 6;
+			velocikitten = 5;
+			thingAdd(hallGlass, 80, 48);			//Spawn broken glass
+			thing[entryWindow].state = 1;			//Break the window
+			playAudio("audio/glass_2.wav");
+		}
+	}
+
+	
+		
+	thingLogic();
+
+	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+
+
+	moveJump = false;
+	
+	if (button(select_but)) {
+
+	  pwm_set_freq_duty(6, 0, 0);	  
+	  pwm_set_freq_duty(8, 0, 0);
+	  pwm_set_freq_duty(10, 0, 0);
+	  pwm_set_freq_duty(12, 0, 0);
+	  fillTiles(0, 0, 31, 31, ' ', 0);
+	  
+	}
+
+	if (dutyOut > 0) {
+		pwm_set_freq_duty(12, 100 - dutyOut, 50);
+		dutyOut -= 10;
+		if (dutyOut < 1) {
+			dutyOut = 0;
+			pwm_set_freq_duty(12, 0, 0);
+		}
+		
+	}
+	
+
+	// drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
+	// drawSpriteDecimal(xWindowBudToTile, 10, 8, 0);		
+	// drawSpriteDecimal(budWorldX, 10, 16, 0);
+	// drawSpriteDecimal(budWorldY, 10, 24, 0);	
+	
+
+	
+	// drawSpriteDecimal(budX, 8, 0, 0);		
+	// drawSpriteDecimal(xWindowBudFine, 8, 8, 0);	
+	// drawSpriteDecimal(xWindowBudToTile, 8, 16, 0);
+	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
+
+
+}
+
+void budLogic() {
+
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
 	
 	if (++budSubFrame > 1) {
@@ -865,6 +952,8 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 	
 	bool budNoMove = true;
 	
+	//drawSprite(budX, budY, 0x9F, 4, false, false);
+
 	switch(budState) {
 	
 		case rest:								//Rest = not moving left or right. Can still be jumping or falling
@@ -926,22 +1015,41 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 			}
 			break;
 		
-		case moving:		
-			if (budDir == false) {		
-				drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
-				budMoveRight(3);		
+		case moving:
+			if (jump > 0) {						//If jumping while moving use the jump stills
+				int offset = 6;					//Jumping up gfx (default)
+				if (jump == 128) {
+					offset = 8;					//Falling down gfx
+				}	
+				if (budDir == false) {														//Falling facing right	
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					budMoveRight(3);
+				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					budMoveLeft(3);
+				}		
 			}
-			else {				
-				drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
-				setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-				budMoveLeft(3);		
+			else {										//Running on ground animation
+	
+				if (budDir == false) {		
+					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					budMoveRight(3);		
+				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					budMoveLeft(3);		
+				}
+				if (animateBud) {
+					if (++budFrame > 6) {
+						budFrame = 0;
+					}					
+				}		
 			}
-			if (animateBud) {
-				if (++budFrame > 6) {
-					budFrame = 0;
-				}					
-			}			
 			break;	
 	
 		case entering:
@@ -960,9 +1068,7 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 			}		
 		
 			break;
-	
-	
-	
+
 	}
 
 	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
@@ -982,7 +1088,22 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 	
 	if (jump == 0 || jump == 128) {		//Walked off a ledge or coming down from a jump?
 	
-		if (getTileType(xWindowCoarseTile, (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
+		bool fallEdge = false;
+		
+		//if (budDir == true) {			//Facing left?
+			if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
+				fallEdge = true;
+			}
+		// }
+		// else {							//Facing right
+			// if (getTileType(budTileCheck(-1), (budY >> 3)) == 0 && getTileType(budTileCheck(0), (budY >> 3)) == 0) {	//Nothing below?
+				// fallEdge = true;
+			// }			
+		// }
+	
+	
+	
+		if (fallEdge == true) {			//Nothing below?
 		
 			if (jump == 0) {			//Weren't already falling?
 				velocikitten = 2;		//Means we walked off a ledge, reset velocity
@@ -1088,38 +1209,6 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 		budFrame = 0;
 	}
 		
-	
-	
-	
-	thingLogic();
-	
-
-	
-	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
-
-	// setWindowSlice(0, xPos << 1); 			//Last 2 rows set no scroll
-	// setWindowSlice(1, xPos << 1); 			//Last 2 rows set no scroll	
-	// setWindowSlice(2, xPos << 1); 			//Last 2 rows set no scroll
-	// setWindowSlice(3, xPos << 1); 			//Last 2 rows set no scroll		
-	//setWindowSlice(14, xPos << 1); 
-
-
-	moveJump = false;
-
-	
-    uint slice_num = pwm_gpio_to_slice_num(14);
-    uint chan = pwm_gpio_to_channel(14);
-	
-	if (button(select_but)) {
-
-	  pwm_set_freq_duty(6, 0, 0);	  
-	  pwm_set_freq_duty(8, 0, 0);
-	  pwm_set_freq_duty(10, 0, 0);
-	  pwm_set_freq_duty(12, 0, 0);
-	  fillTiles(0, 0, 31, 31, ' ', 0);
-	  
-	}
-
 
 	int tempCheck = checkDoors();			//See if Bud is standing in front of a door
 	
@@ -1167,24 +1256,6 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 		}
 		
 	}
-
-	// if (button(up_but)) {
-
-		// budState = entering;
-		
-		// thingRemove(0xFF);
-		
-		// drawText("0123456789ABC E brute?", 0, 0, true);
-		// pwm_set_freq_duty(slice_num, chan, 261, 25);
-		
-		// Serial.print(" s-");		
-		// Serial.print(pwm_gpio_to_slice_num(10), DEC);
-		// Serial.print(" c-");
-		// Serial.println(pwm_gpio_to_channel(10), DEC);
-		// pwm_set_freq_duty(6, 261, 12);
-		// pwm_set_freq_duty(8, 277, 50);		
-	// }
-	
 	
 	if (button(B_but)) {
 		thingAdd(bigRobot, 100, 64);
@@ -1195,34 +1266,14 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 		//pwm_set_freq_duty(8, 277, 50);
 	}	
 	
+	if (button(A_but)) {
+		switchMenuTo(mainMenu);
+	}		
+	
+	
 
 	
 	
-	if (dutyOut > 0) {
-		pwm_set_freq_duty(12, 100 - dutyOut, 50);
-		dutyOut -= 10;
-		if (dutyOut < 1) {
-			dutyOut = 0;
-			pwm_set_freq_duty(12, 0, 0);
-		}
-		
-	}
-	
-	//drawSpriteText("GAME OVAH", 16, 16, 3);
-	
-	drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
-	drawSpriteDecimal(budWorldX >> 3, 10, 8, 0);		
-	drawSpriteDecimal(budWorldX, 10, 16, 0);
-	drawSpriteDecimal(budWorldY, 10, 24, 0);	
-	
-
-	
-	// drawSpriteDecimal(budX, 8, 0, 0);		
-	// drawSpriteDecimal(xWindowBudFine, 8, 8, 0);	
-	// drawSpriteDecimal(xWindowCoarseTile, 8, 16, 0);
-	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
-
-
 }
 
 void setupHallway() {
@@ -1237,7 +1288,9 @@ void setupHallway() {
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-	startBoss(6, 6, 8);
+	//doorTilePos[6]
+
+	spawnIntoLevel(6, 5, 40);
 	
 	drawHallway(1);	
 
@@ -1268,7 +1321,7 @@ bool budMoveLeft(int speed) {
 		if (xWindowBudFine < 0) {				//Passed tile boundary?
 			xWindowBudFine += 8;			//Reset fine bud screen scroll
 			
-			xWindowCoarseTile = windowCheckLeft(xWindowCoarseTile);
+			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
 		}			
 	}
 	
@@ -1277,7 +1330,7 @@ bool budMoveLeft(int speed) {
 
 bool budMoveRight(int speed) {
 
-	if ((getTileType(budTileCheck(2), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
+	if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
 		return false;
 	}
 	
@@ -1289,7 +1342,7 @@ bool budMoveRight(int speed) {
 		if (xWindowBudFine > 7) {				//Passed tile boundary?
 			xWindowBudFine -= 8;			//Reset fine bud screen scroll
 			
-			xWindowCoarseTile = windowCheckRight(xWindowCoarseTile);
+			xWindowBudToTile = windowCheckRight(xWindowBudToTile);
 		}			
 	}
 	
@@ -1319,7 +1372,7 @@ bool windowMoveLeft(int theSpeed) {
 		xWindowFine += 8;				//Subtract fine		
 		
 		xWindowCoarse = windowCheckLeft(xWindowCoarse);
-		xWindowCoarseTile = windowCheckLeft(xWindowCoarseTile);
+		xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
 		xStripLeft = windowCheckLeft(xStripLeft);
 		xStripRight = windowCheckLeft(xStripRight);
 
@@ -1361,7 +1414,7 @@ bool windowMoveRight(int theSpeed) {
 		xWindowFine -= 8;				//Subtract fine		
 		
 		xWindowCoarse = windowCheckRight(xWindowCoarse);
-		xWindowCoarseTile = windowCheckRight(xWindowCoarseTile);
+		xWindowBudToTile = windowCheckRight(xWindowBudToTile);
 		xStripLeft = windowCheckRight(xStripLeft);
 		xStripRight = windowCheckRight(xStripRight);
 
@@ -1401,7 +1454,7 @@ int windowCheckRight(int theValue) {
 
 int budTileCheck(int whereTo) {
 
-	int temp = xWindowCoarseTile;	//Get tile position
+	int temp = xWindowBudToTile;	//Get tile position
 
 	if (whereTo < 0) {				//Negative? (checking left)
 		temp += whereTo;
@@ -1422,7 +1475,6 @@ int budTileCheck(int whereTo) {
 	
 }
 
-
 int checkDoors() {
 	
 	uint16_t tileX = budWorldX >> 3;			//Convert Bud fine world X to tiles X
@@ -1433,7 +1485,7 @@ int checkDoors() {
 
 	for (int x = 0 ; x < 6 ; x++) {
 	
-		if (tileX >= doorTilePos[x] && tileX <= (doorTilePos[x] + 2)) {			//Is Bud aligned with a door?
+		if (tileX >= doorTilePos[x] && tileX <= (doorTilePos[x] + 1)) {			//Is Bud aligned with a door?
 			return x;
 		}
 	
@@ -1451,7 +1503,7 @@ int checkElevator() {
 		return -1;
 	}
 
-	if (tileX >= 71 && tileX <= 75) {			//Is Bud aligned with elevator?
+	if (tileX >= 71 && tileX <= 74) {			//Is Bud aligned with elevator?
 		return 1;
 	}
 
@@ -1462,11 +1514,11 @@ int checkElevator() {
 void drawHallway(int floor) {
 
 	for (int x = 0 ; x < 148 ; x++) {
-			populateObject(x, hallBlank, 1);		
+		populateObject(x, hallBlank, 1);		
 	}
 	
-	populateObject(6, 3, 3);			//Left wall
-	populateObject(139, 4, 3);			//Right wall
+	populateObject(6, 3, 4);			//Left wall
+	populateObject(138, 4, 4);			//Right wall
 
 	int drawWhichDoor = 1;
 
@@ -1480,6 +1532,8 @@ void drawHallway(int floor) {
 		xx += 18;
 		
 	}
+	
+	populateObject(10, hallCounterWindow, 4);
 
 	populateObject(64, hallCounter, 4);
 	populateObject(70, hallElevator, 8);
@@ -1497,6 +1551,8 @@ void drawHallway(int floor) {
 		
 	}	
 	
+	populateObject(134, hallCounterWindow, 4);
+	
 	for (int x = 0 ; x < 6 ; x++) {
 	
 		populateDoor(doorTilePos[x], x + 1, false);
@@ -1506,7 +1562,12 @@ void drawHallway(int floor) {
 
 	for (int x = 150 ; x < 1000 ; x += 100) {
 		thingAdd(greenie, x, 32);
+		
+		thingAdd(greenie, x + 50, 64);
 	}
+	
+	entryWindow = thingAdd(hallWindow, 80, 48);			//Get the index for this one
+	thingAdd(hallWindow, 1072, 48);	
 	
 	thingAdd(chandelier, 200, 8);
 	thingAdd(chandelier, 344, 8);	
@@ -1555,11 +1616,9 @@ void redrawCurrentHallway() {
 	
 	xStripDrawing = xStripLeft;					
 
-	for (int x = xLevelStripLeft ; x < (xLevelStripRight + 1) ; x++) {
-		drawHallwayTiles(x);
-		if (++xStripDrawing > 31) {
-			xStripDrawing = 0;
-		}
+	for (int x = xLevelStripLeft ; x < (xLevelStripLeft + 27) ; x++) {
+		drawHallwayTiles(x);		
+		++xStripDrawing &= 0x1F;
 	}	
 	
 }
@@ -1577,7 +1636,10 @@ void drawHallwayTiles(uint16_t levelStrip) {
 		
 		case 0:
 			hallwayBlankStrip(whichStrip);
-		break;					
+		break;	
+		case 1:
+			hallwayCounterStripWindow(whichStrip);
+		break;		
 		case 2:
 			hallwayCounterStrip(whichStrip);
 		break;
@@ -1662,9 +1724,18 @@ void hallwayWallLeft(int whichStrip) {		//Hallway object 3
 			}
 			drawTile(xStripDrawing, 5, 0xA9, 1);
 			drawTile(xStripDrawing, 6, 0xB9, 1);
-			drawTile(xStripDrawing, 4, 0xA3, 3, tilePlatform);
+			drawTile(xStripDrawing, 4, 0xA1, 3, tilePlatform);
 			
 		break;
+		case 3:
+			drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
+			for (int g = 0 ; g < 13 ; g++) {
+				drawTile(xStripDrawing, g, 0x9D, 3);	//Draw blank wall
+			}
+			drawTile(xStripDrawing, 5, 0xAA, 1);
+			drawTile(xStripDrawing, 4, 0xA3, 3, tilePlatform);
+			
+		break;		
 	
 	}
 	
@@ -1677,19 +1748,28 @@ void hallwayWallRight(int whichStrip) {		//Hallway object 3
 	drawTile(xStripDrawing, 14, 0x9E, 3, tileBlocked);		//Draw floor as a solid blocking tile
 
 	switch(whichStrip) {
-	
+
 		case 0:
-				drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
+			drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
+			for (int g = 0 ; g < 13 ; g++) {
+				drawTile(xStripDrawing, g, 0x9D, 3);	//Draw blank wall
+			}
+			drawTile(xStripDrawing, 5, 0xAA, 1, tilePlatform);
+			drawTile(xStripDrawing, 4, 0xA0, 3, tilePlatform);			
+		break;	
+	
+		case 1:
+			drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
 			for (int g = 0 ; g < 13 ; g++) {
 				drawTile(xStripDrawing, g, 0x9D, 3);	//Draw blank wall
 			}
 			drawTile(xStripDrawing, 5, 0xC8, 1, tilePlatform);
 			drawTile(xStripDrawing, 6, 0xD8, 1);
-			drawTile(xStripDrawing, 4, 0xA0, 3, tilePlatform);
+			drawTile(xStripDrawing, 4, 0xA1, 3, tilePlatform);
 			
 		break;
 		
-		case 1:
+		case 2:
 			drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
 			
 			for (int g = 0 ; g < 13 ; g++) {
@@ -1701,7 +1781,7 @@ void hallwayWallRight(int whichStrip) {		//Hallway object 3
 			
 		break;
 		
-		case 2:
+		case 3:
 			for (int g = 0 ; g < 14 ; g++) {
 				drawTile(xStripDrawing, g, 0xB1, 3, tileBlocked);	//Draw solid wall
 			}		
@@ -1807,6 +1887,35 @@ void hallwayCounterStrip(int whichStrip) {	//Hallway object 2
 	
 }
 
+void hallwayCounterStripWindow(int whichStrip) {	//Hallway object 2
+
+	const char tiles[4][5] = {
+		{ 0xF4, 0xE4, 0xD4, 0xC4, 0xA0 },
+		{ 0xF5, 0xE5, 0xD5, 0xC5, 0xA1 },	
+		{ 0xF6, 0xE6, 0xD6, 0xC6, 0xA2 },		
+		{ 0xF7, 0xE7, 0xD7, 0xC7, 0xA3 },		
+	};
+
+	drawTile(xStripDrawing, 14, 0x9E, 3, tileBlocked);		//Draw floor
+
+	for (int g = 0 ; g < 4 ; g++) {
+		drawTile(xStripDrawing, 13 - g, tiles[whichStrip][g], 1);
+	}	
+
+	setTileType(xStripDrawing, 13, tilePlatform);
+	
+	drawTile(xStripDrawing, 9, tiles[whichStrip][4], 3, tilePlatform);	//Draw top of bureau as platform
+
+	for (int g = 0 ; g < 6 ; g++) {
+		drawTile(xStripDrawing, g, 0x9D, 3);		//Blank walls
+	}
+	
+	for (int g = 6 ; g < 9 ; g++) {
+		drawTile(xStripDrawing, g, ' ', 3);		    //Black hole for windows
+	}	
+	
+}
+
 void hallwayElevator(int whichStrip) {		//Hallway object 5
 
 	char floorText[7] = { 0xDC, 0xDD, 0xDE, 0xDF, 0xDC, 0xDC, 0xDC };
@@ -1858,7 +1967,7 @@ void hallwayElevator(int whichStrip) {		//Hallway object 5
 
 	setTileType(xStripDrawing, 13, tilePlatform);	
 
-	for (int g = 0 ; g < 3 ; g++) {
+	for (int g = 0 ; g < 4 ; g++) {
 		drawTile(xStripDrawing, g, 0x9D, 3);		//Blank walls
 	}
 	
@@ -1886,8 +1995,7 @@ void drawChandelier(int tileX) {
 	
 }
 
-
-bool thingAdd(int whichThing, int16_t x, int16_t y) {
+int thingAdd(int whichThing, int16_t x, int16_t y) {
 	
 	int index;
 	
@@ -1898,7 +2006,7 @@ bool thingAdd(int whichThing, int16_t x, int16_t y) {
 	}
 	
 	if (index == maxThings) {							//Didn't find a slot? Return false
-		return false;
+		return -1;
 	}
 
 	switch(whichThing) {
@@ -1931,6 +2039,21 @@ bool thingAdd(int whichThing, int16_t x, int16_t y) {
 			thing[index].setSize(4 * 8, 3 * 8);
 			break;				
 			
+		case hallWindow:
+			thing[index].active =  true;
+			thing[index].type = hallWindow;
+			thing[index].setPos(x, y);
+			thing[index].state = 0;	
+			thing[index].setSize(4 * 8, 3 * 8);		
+			break;
+		case hallGlass:
+			thing[index].active =  true;
+			thing[index].type = hallGlass;
+			thing[index].setPos(x, y);
+			thing[index].state = 0;	
+			thing[index].setSize(4 * 8, 3 * 8);		
+			break;
+			
 			
 	}
 	
@@ -1938,7 +2061,7 @@ bool thingAdd(int whichThing, int16_t x, int16_t y) {
 	
 	lastAdded = index;
 
-	return true;
+	return lastAdded;
 	
 }
 
@@ -2018,7 +2141,7 @@ void thingLogic() {
 				
 				case greenie:
 					thing[g].scanG(worldX, worldY);
-
+					//if (thing[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {
 					if (thing[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
 						thingRemove(g);
 						playAudio("audio/greenie.wav");
@@ -2061,7 +2184,15 @@ void thingLogic() {
 				case chandelierSmashed:
 					thing[g].scanC2(worldX, worldY);
 					//Can robot clean up?
-					break;							
+					break;	
+
+				case hallWindow:
+					thing[g].scanC3(worldX, worldY);				
+					break;
+				case hallGlass:
+					thing[g].scanC4(worldX, worldY);				
+					break;
+					
 				
 			}
 		}
