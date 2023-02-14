@@ -2,7 +2,7 @@
 #include "thingObject.h"
 //Your defines here------------------------------------
 #include "hardware/pwm.h"
-#include <WiFi.h>
+//#include <WiFi.h>
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
@@ -137,7 +137,7 @@ char ssidString[32];
 char passwordString[32];
 int passwordCharEdit = 0;
 
-WiFiMulti multi;
+//WiFiMulti multi;
 
 const char* ssid = "Wireless Hub #42";
 const char* password = "BAD42FAB42";
@@ -461,13 +461,13 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 				
 				if (++menuTimer == 30) {
 					menuTimer = 0;
-					if (multi.run() == WL_CONNECTED) {
-						drawText("SUCCESS!", 0, 5, false);	
-						wifiConnected = true;
-					}
-					else {
-						drawText("FAIL!", 0, 5, false);
-					}								
+					// if (multi.run() == WL_CONNECTED) {
+						// drawText("SUCCESS!", 0, 5, false);	
+						// wifiConnected = true;
+					// }
+					// else {
+						// drawText("FAIL!", 0, 5, false);
+					// }								
 				}			
 				
 			}
@@ -576,28 +576,28 @@ void drawWifiScreen() {
 
 	int y = 1;
 
-	auto cnt = WiFi.scanNetworks();
+	// auto cnt = WiFi.scanNetworks();
 	
-	networksFound = 0;
+	// networksFound = 0;
 	
-	if (!cnt) {
-		drawText("NO NETWORKS", 0, 0, false);
-	}
-	else {
-		drawText("NETWORKS:", 0, 0, false);
-		drawDecimal(cnt, 10, 0);
+	// if (!cnt) {
+		// drawText("NO NETWORKS", 0, 0, false);
+	// }
+	// else {
+		// drawText("NETWORKS:", 0, 0, false);
+		// drawDecimal(cnt, 10, 0);
 
-		for (auto i = 0; i < cnt; i++) {
-			uint8_t bssid[6];
-			WiFi.BSSID(i, bssid);
-			//Serial.printf("%32s %5s %17s %2d %4d\n", WiFi.SSID(i), encToString(WiFi.encryptionType(i)), macToString(bssid), WiFi.channel(i), WiFi.RSSI(i));
-			fillTiles(1, y, 31, y, 0x04, 3);
-			drawText(WiFi.SSID(i), 2, y, false);
-			drawTile(1, y, rssiToIcon(WiFi.RSSI(i)), 3, 0);			//Draw strength
-			networksFound++;
-			y++;		  
-		}
-	}
+		// for (auto i = 0; i < cnt; i++) {
+			// uint8_t bssid[6];
+			// WiFi.BSSID(i, bssid);
+			// //Serial.printf("%32s %5s %17s %2d %4d\n", WiFi.SSID(i), encToString(WiFi.encryptionType(i)), macToString(bssid), WiFi.channel(i), WiFi.RSSI(i));
+			// fillTiles(1, y, 31, y, 0x04, 3);
+			// drawText(WiFi.SSID(i), 2, y, false);
+			// drawTile(1, y, rssiToIcon(WiFi.RSSI(i)), 3, 0);			//Draw strength
+			// networksFound++;
+			// y++;		  
+		// }
+	// }
 	
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;
@@ -643,7 +643,7 @@ void drawLoginScreen() {
 	drawText("Password:", 0, 2, false);	
 	drawText(passwordString, 0, 3, false);
 
-	multi.addAP(ssid, password);
+	//multi.addAP(ssid, password);
 	
 	menuTimer = 0;
 	
@@ -1567,7 +1567,7 @@ void drawHallway(int floor) {
 	}
 	
 	entryWindow = thingAdd(hallWindow, 80, 48);			//Get the index for this one
-	thingAdd(hallWindow, 1072, 48);	
+	thingAdd(hallWindow, 1071, 48);	
 	
 	thingAdd(chandelier, 200, 8);
 	thingAdd(chandelier, 344, 8);	
