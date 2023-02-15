@@ -234,7 +234,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 			}
 			
 			if (menuTimer == 0) {					//First boot, or did timer reach 0?
-				if (loadRGB("NEStari.pal")) {					//Try and load master pallete from root dir
+				if (loadRGB("UI/NEStari.pal")) {				//Try and load master pallete from root dir (only need to load this once)
 					//Load success? Load the rest
 					loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
 					loadPattern("UI/logofont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
@@ -530,14 +530,14 @@ void drawSplashScreen() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;
 	
-	playAudio("gameBadge.wav");		//Splash audio
+	playAudio("audio/gameBadge.wav");		//Splash audio
 	
 }
 
 void drawMainMenu() {
 
 	loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("UI/baseFont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+	loadPattern("UI/menuFont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
 
 	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
 	
@@ -1278,8 +1278,8 @@ void budLogic() {
 
 void setupHallway() {
 
-	loadPalette("bud.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("bud.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+	loadPalette("hallway/hallway.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("hallway/hallway.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
 
 	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
 	setButtonDebounce(down_but, false, 0);

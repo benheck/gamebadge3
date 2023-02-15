@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\ben\\source\\repos\\HSB\\HSB.csproj",
+      "projectUniqueName": "C:\\Users\\ben\\Documents\\GitHub\\gamebadge3\\code\\utilities and test code\\HSB\\HSB.csproj",
       "projectName": "HSB",
-      "projectPath": "C:\\Users\\ben\\source\\repos\\HSB\\HSB.csproj",
+      "projectPath": "C:\\Users\\ben\\Documents\\GitHub\\gamebadge3\\code\\utilities and test code\\HSB\\HSB.csproj",
       "packagesPath": "C:\\Users\\ben\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\ben\\source\\repos\\HSB\\obj\\",
+      "outputPath": "C:\\Users\\ben\\Documents\\GitHub\\gamebadge3\\code\\utilities and test code\\HSB\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\ben\\AppData\\Roaming\\NuGet\\NuGet.Config",
