@@ -116,8 +116,12 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen, mainMenu, wifiMode, passwordEntry, login, gameRunning };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { titleScreen, titleScreen2, game };					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { titleScreen, titleScreen2, levelEdit, saveMap, loadMap, game };					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = titleScreen;
+
+enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
+stateMachineEdit editState = tileDrop;
+
 
 uint16_t menuTimer;
 uint8_t cursorTimer;
@@ -141,6 +145,53 @@ int passwordCharEdit = 0;
 
 const char* ssid = "Wireless Hub #42";
 const char* password = "BAD42FAB42";
+
+#define condoWidth	120  				//15 * 8
+
+static uint16_t condoMap[15][condoWidth];
+
+int drawX = 7;				//Cursor XY
+int drawY = 7;
+int cursorBlink	= 0;			//Cursor blinking
+bool cursorMenuShow = false;	//True = show selection stuff
+int cursorDrops = 0;			//0 = tiles 1 = sprites
+int cursorMenu = 0;				//0 = tiles 1 = sprites
+bool editEntryFlag = false;		//Use to debounce A when entering edit mode
+int cursorMoveTimer = 0;		//During editing, if D-pad held for X frames we move full speed
+bool bButtonFlag = false;		//Changes debounce between tile drop and tile select
+
+//The tile select window
+int tileSelectX = 0;		//+2 = tile to drop
+int tileSelectY = 0;		//+2 = tile to drop
+int nextTileDrop = 0xA0;		//Place this value after selecting tile
+int tilePlacePalette = 1;	//What palette dropping tiles use (0-3)
+
+int editWindowX = 0;		//The editing window position on the condo map
+
+int currentCopyBuffer = 0;
+uint16_t copyBuffer[15][60];			//Edit buffer holds up to 4 screens (4 paste buffers)
+int copyBufferUL[4][2];				//The upper left corner of what we copied
+int copyBufferLR[4][2];				//The lower right corner of what we copied
+int copyBufferSize[4][2];			//[num][0=x size 1=y size] of each buffer
+
+int copySelectWhich = 0;				//0 = inactive, 1 = select upper left, 2 = select lower right
+
+int editAaction = 0;					//What the A button does in edit mode
+bool manualAdebounce = false;
+
+bool copyMode = false;
+bool pasteMode = false;
+bool editMenuActive = false;
+int editMenuSelectionY = 0;
+int editMenuBaseY = 0;
+
+char message[15];					    //A message on bottom of edit screen?
+int messageTimer = 0;					//If above zero, dec per frame and erase menu once zero
+
+char mapFileName[20] = { 'l', 'e', 'v', 'e', 'l', 's', '/', 'c', 'o', 'n', 'd', 'o', '1', '_', '1', '.', 'm', 'a', 'p', 0 };	//levels/condoX_X.map + zero terminator
+
+char fileNameFloor = '1';
+char fileNameRoom = '1';
 
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -173,13 +224,13 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 	}
 
 	if (displayPause == false) {   
-		if (button(start_but)) {      //Button pressed?
+		if (button(select_but)) {      //Button pressed?
 		  displayPause = true;
 		  Serial.println("PAUSED");
 		}      
 	}
 	else {
-		if (button(start_but)) {      //Button pressed?
+		if (button(select_but)) {      //Button pressed?
 		  displayPause = false;
 		  Serial.println("UNPAUSED");
 		}    
@@ -732,12 +783,12 @@ void gameFrame() {
 				}
 			}
 			
-			fillTiles(cursorX, 10, cursorX, 12, '@', 0);					//Erase arrows
+			fillTiles(cursorX, 9, cursorX, 12, '@', 0);					//Erase arrows
 			
 			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
 			if (button(up_but)) {
-				if (cursorY > 10) {
+				if (cursorY > 9) {
 					cursorY--;
 					pwm_set_freq_duty(6, 493, 25);
 					soundTimer = 10;
@@ -755,12 +806,12 @@ void gameFrame() {
 				menuTimer = 0;
 				switch(cursorY) {
 					
-					case 10:
+					case 9:
 						switchGameTo(game);
 					break;
 					
 					case 11:
-					
+						switchGameTo(levelEdit);
 					break;
 					
 					case 12:
@@ -775,6 +826,20 @@ void gameFrame() {
 			
 			//TIMER TO ATTRACT
 			//SELECT START
+		break;
+
+		case levelEdit:
+			if (isDrawn == false) {
+				setupEdit();
+			}		
+			if (editEntryFlag == true) {		//user must release A button before we can edit (to avoid false drops after removing debounce)
+				if (button(A_but) == false) {
+					editEntryFlag = false;
+				}
+			}
+			else {
+				editLogic();
+			}			
 		break;
 					
 		case game:
@@ -802,6 +867,623 @@ void switchGameTo(stateMachineGame x) {		//Switches state of game
 	displayPause = true;
 	gameState = x;		
 	isDrawn = false;
+	
+}
+
+void setupEdit() {
+
+	loadPalette("condo/condo.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("condo/condo.nes", 0, 256);			//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+
+	setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
+	setButtonDebounce(down_but, false, 0);
+	setButtonDebounce(left_but, false, 0);
+	setButtonDebounce(right_but, false, 0);	
+	
+	setButtonDebounce(B_but, false, 0);
+	setButtonDebounce(A_but, false, 0);	
+	
+	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+	cursorMoveTimer = 0;
+
+	//fillTiles(0, 0, 14, 14, ' ', 3);			//Clear screen
+	
+	//condoMap[
+//#define tilePlatform		0x80
+//#define tileBlocked			0x40
+	
+	//Draw map basics	
+	
+	for (int x = 0 ; x < 8 ; x++) {							//8 screens wide
+		
+		for (int y = 0 ; y < 13 ; y++) {					//Top 13 rows (bottom is floor)
+			
+			for (int xx = 0 ; xx < 15 ; xx++) {				//Make it all blank
+				condoMap[y][(x * 15) + xx] = ' ' | (3 << 8);
+			}
+		}
+		
+		condoMap[12][(x * 15) + 14] = 0xF0;					//Screen edge line marker
+		
+	}	
+	
+	
+	for (int x = 0 ; x < condoWidth ; x++) {		//Floor
+		condoMap[14][x] = 0x5C | (tileBlocked << 8) | (3 << 8);
+	}
+	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
+		condoMap[13][x] = ' ' | (tilePlatform << 8)| (3 << 8);
+	}		
+	for (int y = 0 ; y < 13 ; y++) {
+		condoMap[y][0] = 0x5B | (tileBlocked << 8)| (3 << 8);						//Left wall
+	}	
+	for (int y = 0 ; y < 13 ; y++) {
+		condoMap[y][condoWidth - 1] = 0x5B | (tileBlocked << 8)| (3 << 8);				//Right wall
+	}
+
+	//Draw door
+	
+	
+
+
+	editState = tileDrop;			//State of editor to start
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
+
+	editEntryFlag = true;			//Entry flag, user must release A before we can draw
+
+	redrawEditWindow();	
+	
+	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
+	
+}
+
+void drawEditMenuPopUp() {
+
+	fillTiles(0, 0, 14, 8, ' ', 0);			//Clear area
+
+	if (cursorBlink & 0x01) {
+		drawText(">", 0, editMenuSelectionY, false);		
+	}
+	
+	drawText("COPY TO SLOT", 1, 0, false);
+	drawDecimal(currentCopyBuffer, 14, 0);	
+	drawText("PASTE + SLOT", 1, 1, false);	
+	drawDecimal(currentCopyBuffer, 14, 1);	
+	drawText("UNDO LAST", 1, 2, false);
+	drawText("CHANGE FLOOR", 1, 3, false);
+	tileDirect(14, 3, fileNameFloor);
+	drawText("CHANGE ROOM", 1, 4, false);
+	tileDirect(14, 4, fileNameRoom);
+	
+	drawText("SAVE FILE", 1, 5, false);
+	drawText("LOAD FILE", 1, 6, false);
+	drawText("EXIT TO MENU", 1, 7, false);		
+
+	if (button(left_but)) {
+		switch(editMenuSelectionY) {		
+			case 0:
+			case 1:
+				if (--currentCopyBuffer < 0) {
+					currentCopyBuffer = 3;			//Roll over
+				}						
+			break;
+			
+			case 3:
+				if (--fileNameFloor < 49) {			//1-9
+					fileNameFloor = 57;					
+				}
+				updateMapFileName();
+			break;
+			
+			case 4:
+				if (--fileNameRoom < 49) {			//1-9
+					fileNameRoom = 57;
+				}	
+				updateMapFileName();	
+			break;
+		}
+	}
+	if (button(right_but)) {
+		switch(editMenuSelectionY) {		
+			case 0:
+			case 1:
+				if (++currentCopyBuffer > 3) {
+					currentCopyBuffer = 0;			//Roll over
+				}					
+			break;
+			
+			case 3:
+				if (++fileNameFloor > 57) {			//1-9
+					fileNameFloor = 49;
+				}
+				updateMapFileName();
+			break;
+			
+			case 4:
+				if (++fileNameRoom > 57) {			//1-9
+					fileNameRoom = 49;
+				}
+				updateMapFileName();		
+			break;
+		}		
+
+	}
+	if (button(up_but)) {
+		if (--editMenuSelectionY < 0) {
+			editMenuSelectionY = 7;			//Roll over
+		}
+	}
+	if (button(down_but)) {
+		if (++editMenuSelectionY > 7) {
+			editMenuSelectionY = 0;				//Roll over
+		}
+	}
+	
+	if (button(A_but)) {
+	
+		int which = editMenuSelectionY;
+		
+		if (which > 8) {
+			which -= 9;
+		}
+		
+		switch(which) {
+		
+			case 0:		//Copy
+				editAaction = 1;
+				copySelectWhich = 1;
+				makeMessage("UPPER LEFT?");
+				setButtonDebounce(A_but, true, 1);
+			break;
+			
+			case 1:		//Paste
+				editAaction = 2;
+				copySelectWhich = 1;
+				makeMessage("UPPER LEFT?");
+				setButtonDebounce(A_but, true, 1);
+			break;
+			
+			case 2:		//Undo
+			
+			break;
+
+			case 5:		//Save
+				saveLevel();
+			break;
+			
+			case 6:		//Load
+				loadLevel();
+			break;				
+
+			case 7:		//Exit to menu
+				switchMenuTo(mainMenu);
+			break;
+		
+			
+		}
+			
+		editMenuActive = false;
+		setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
+		setButtonDebounce(down_but, false, 0);
+		setButtonDebounce(left_but, false, 0);
+		setButtonDebounce(right_but, false, 0);
+	
+		redrawEditWindow();	
+
+	}
+	
+}
+
+void updateMapFileName() {
+	
+	mapFileName[12] = fileNameFloor;
+	mapFileName[14] = fileNameRoom;
+
+}
+
+void saveLevel() {
+
+	saveFile(mapFileName);
+	
+	//return;
+	
+	for (int y = 0 ; y < 15 ; y++) {				//Write the map file in horizontal strips from left to right, top to bottom
+		
+		for (int x = 0 ; x < condoWidth ; x++) {
+			
+			//Each map tile is 16 bit, file access is byte-aligned
+			writeByte(condoMap[y][x] >> 8);		//Write high byte first (big endian)
+			writeByte(condoMap[y][x] & 0xFF);	//Write low byte second
+		}		
+		
+	}
+	
+	//SAVE OTHER METADATA HERE (robots, greenies, etc)
+	
+	closeFile();								//Close the file when done (doesn't seem to be working???)
+	
+	makeMessage("SAVED!");
+	messageTimer = 30;
+	redrawEditWindow();	
+
+	
+}
+
+void loadLevel() {
+	
+	if (loadFile(mapFileName) == false) {	
+		makeMessage("FILE NOT FOUND");
+		messageTimer = 30;
+		redrawEditWindow();	
+		return;		
+	}
+	
+	//File exists, so load it!
+	
+	uint16_t temp;
+	
+	for (int y = 0 ; y < 15 ; y++) {				//Read the map file in horizontal strips from left to right, top to bottom
+		
+		for (int x = 0 ; x < condoWidth ; x++) {
+			temp = readByte() << 8;					//Read first byte and put into high byte (big endian)		
+			temp |= readByte();						//OR next byte into the low byte			
+			condoMap[y][x] = temp;
+		}		
+		
+	}	
+	
+	closeFile();								//Close the file when done
+	
+	redrawEditWindow();
+	
+	makeMessage("LOADED!");
+	messageTimer = 30;
+	redrawEditWindow();		
+	
+	
+}
+
+void editLogic() {
+
+	cursorBlink++;
+
+	if (button(start_but)) {
+		
+		if (editMenuActive == false) {
+			editMenuActive = true;
+
+			editMenuBaseY = 0;
+			editMenuSelectionY = editMenuBaseY;			//Starting menu cursor
+			
+			setButtonDebounce(up_but, true, 1);			//Debounce unless scrolling map left or right
+			setButtonDebounce(down_but, true, 1);
+			setButtonDebounce(left_but, true, 1);
+			setButtonDebounce(right_but, true, 1);	
+
+			
+		}
+		else {
+			editMenuActive = false;
+			setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
+			setButtonDebounce(down_but, false, 0);
+			setButtonDebounce(left_but, false, 0);
+			setButtonDebounce(right_but, false, 0);	
+			redrawEditWindow();
+		}	
+		
+	}
+
+	if (editMenuActive == true) {
+		drawEditMenuPopUp();
+		return;		
+	}
+
+
+	if (button(B_but)) {						//Selecting tiles or sprites?
+
+		if (bButtonFlag == false) {				//Just arrived?			
+			setButtonDebounce(up_but, true, 1);			//Debounce unless scrolling map left or right
+			setButtonDebounce(down_but, true, 1);
+			setButtonDebounce(left_but, true, 1);
+			setButtonDebounce(right_but, true, 1);	
+			bButtonFlag = true;
+			
+			makeMessage("SELECT TILE");
+		}
+
+		int atX = 0;					//Where to draw the window
+		int atY = 0;
+		
+		if (drawY < 7) {
+			atY = 10;
+		}
+		if (drawX < 7) {
+			atX = 10;
+		}
+			
+		drawTileSelectWindow(atX, atY);
+
+		if (cursorBlink & 0x01) {
+			drawSprite((atX + 2) << 3, (atY + 2) << 3, 64, 7, false, false);		//Draw reticle on center select tile
+		}
+		
+		//Scroll around the available tiles
+		if (button(left_but)) {
+			if (--tileSelectX < 0) {
+				tileSelectX = 15;			//Roll over
+			}
+		}
+		if (button(right_but)) {
+			if (++tileSelectX > 15) {
+				tileSelectX = 0;			//Roll over
+			}
+		}
+		if (button(up_but)) {
+			if (--tileSelectY < 0) {
+				tileSelectY = 15;			//Roll over
+			}
+		}
+		if (button(down_but)) {
+			if (++tileSelectY > 15) {
+				tileSelectY = 0;			//Roll over
+			}
+		}
+	
+		cursorMenuShow = true;				//Flag to redraw BG when B is released
+	
+	}
+	else {										//Dropping tiles
+		
+		if (bButtonFlag == true) {						//We were in the B menu?	
+			setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
+			setButtonDebounce(down_but, false, 0);
+			setButtonDebounce(left_but, false, 0);
+			setButtonDebounce(right_but, false, 0);	
+			bButtonFlag = false;
+			clearMessage();
+		}		
+			
+		if (cursorMenuShow == true) {				//B released and now we're back here? Redraw window
+			cursorMenuShow = true;
+			redrawEditWindow();
+		}	
+		bool noMove = true;
+			
+		if (button(left_but)) {	
+			cursorMoveTimer++;			
+			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
+				if (drawX > 0) {
+					drawX -= 1;
+				}
+				else {
+					if (editWindowX > 0) {
+						editWindowX--;	
+						redrawEditWindow();
+					}
+				}	
+
+				if (cursorMoveTimer > 100)	{
+					cursorMoveTimer = 100;
+				}
+			}
+			noMove = false;
+		}
+		if (button(right_but)) {			
+			cursorMoveTimer++;		
+			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
+				if (drawX < 14) {
+					drawX += 1;
+				}
+				else {
+					if (editWindowX < 105) {
+						editWindowX++;	
+						redrawEditWindow();
+					}
+				}	
+
+				if (cursorMoveTimer > 100)	{
+					cursorMoveTimer = 100;
+				}
+			}
+			noMove = false;
+		}
+		if (button(up_but)) {
+			cursorMoveTimer++;			
+			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
+				if (drawY > 0) {
+					drawY -= 1;
+				}
+				if (cursorMoveTimer > 100)	{
+					cursorMoveTimer = 100;
+				}
+			}
+			noMove = false;
+		}
+		if (button(down_but)) {
+			cursorMoveTimer++;			
+			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
+				if (drawY < 14) {
+					drawY += 1;
+				}
+
+				if (cursorMoveTimer > 100)	{
+					cursorMoveTimer = 100;
+				}
+			}
+			noMove = false;
+		}	
+	
+		if (noMove == true) {			//No movement on dpad? Reset timer
+			cursorMoveTimer = 0;
+		}
+
+	}
+
+	if (manualAdebounce == true) {				//Flag that A must be released before it can be pressed again?
+		if (button(A_but) == false) {			//Is button open?
+			manualAdebounce = false;			//Clear flag
+		}		
+	}
+
+
+	if (button(A_but) && manualAdebounce == false) {
+		
+		switch (editAaction) {
+			
+			case 0:		//Drop tile
+				condoMap[drawY][editWindowX + drawX] = nextTileDrop | (tilePlacePalette << 8);		//Drop tile in both the tilemap and the condo map
+				redrawEditWindow();	
+			break;
+			
+			case 1:		//Copy
+				switch(copySelectWhich) {			
+					case 1:
+						copyBufferUL[currentCopyBuffer][0] = drawX + editWindowX;
+						copyBufferUL[currentCopyBuffer][1] = drawY;
+						makeMessage("LOWER RIGHT?");
+						redrawEditWindow();
+						copySelectWhich = 2;
+					break;
+					
+					case 2:
+						copyBufferLR[currentCopyBuffer][0] = drawX + editWindowX;
+						copyBufferLR[currentCopyBuffer][1] = drawY;
+						copyToBuffer();	
+						editAaction	= 0;
+						setButtonDebounce(A_but, false, 0);	
+						makeMessage("COPIED!");
+						messageTimer = 30;
+						manualAdebounce = true;
+					break;
+					
+				}
+			break;
+			
+			case 2:		//Paste
+				editAaction	= 0;
+				pasteFromBuffer();
+				setButtonDebounce(A_but, false, 0);	
+				makeMessage("PASTED!");
+				messageTimer = 30;
+				manualAdebounce = true;				
+			break;
+
+			case 3:		//Save
+			
+			break;
+			
+			case 4:		//Load
+			
+			break;				
+
+			case 5:		//Exit to menu
+				switchMenuTo(mainMenu);
+			break;
+		
+				
+		}
+
+	}
+	
+	if (button(C_but)) {						//Cycle through palettes
+		if (++tilePlacePalette > 3) {
+			tilePlacePalette = 0;
+		}
+	}	
+
+	if (cursorBlink & 0x01) {
+		drawSprite(drawX << 3, drawY << 3, 64, 7, false, false);		//Reticle
+	}
+	else {
+		drawSprite(drawX << 3, drawY << 3, nextTileDrop, tilePlacePalette, false, false);		//Next tile (as sprite)
+	}
+	
+	if (messageTimer > 0) {
+		if (--messageTimer == 0) {
+			clearMessage();
+			redrawEditWindow();			
+		}
+	}
+	
+}
+
+void copyToBuffer() {
+
+	int offset = currentCopyBuffer * 15;		//Buffer is 4 screens wide (15 x 4)
+	int bufferY = 0;								//Copy whatever starting to the upper left corner of the buffer
+
+	copyBufferSize[currentCopyBuffer][0] = copyBufferLR[currentCopyBuffer][0] - copyBufferUL[currentCopyBuffer][0];
+	copyBufferSize[currentCopyBuffer][1] = copyBufferLR[currentCopyBuffer][1] - copyBufferUL[currentCopyBuffer][1];
+
+	for (int y = copyBufferUL[currentCopyBuffer][1] ; y < (copyBufferLR[currentCopyBuffer][1] + 1) ; y++) {	
+
+		int offsetX = offset;
+	
+		for (int x = copyBufferUL[currentCopyBuffer][0] ; x < (copyBufferLR[currentCopyBuffer][0] + 1) ; x++) {			
+			copyBuffer[bufferY][offsetX++] = condoMap[y][x];			
+		}	
+		bufferY++;
+	}
+		
+}
+
+void pasteFromBuffer() {
+	
+	int offset = currentCopyBuffer * 15;		//Buffer is 4 screens wide (15 x 4) start at the left edge of the specified buffer
+
+	int bufferY2K = drawY;
+
+	for (int y = 0 ; y < (copyBufferSize[currentCopyBuffer][1] + 1) ; y++) {	
+
+		for (int x = 0 ; x < (copyBufferSize[currentCopyBuffer][0] + 1) ; x++) {			
+			condoMap[bufferY2K][editWindowX + drawX + x] = copyBuffer[y][x + offset];			
+		}	
+		bufferY2K++;		
+	}
+
+	redrawEditWindow();
+	
+}
+
+void redrawEditWindow() {
+
+	for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
+		for (int xx = 0 ; xx < 15 ; xx++) {						//Draw across
+			tileDirect(xx, y, condoMap[y][editWindowX + xx]);
+		}
+	}
+	
+	if (message[0] != 0) {		
+		drawText(message, 0, 14);
+	}
+
+}
+
+void drawTileSelectWindow(int startX, int startY) {
+	
+	int atY = tileSelectY;
+
+	for (int y = startY ; y < (startY + 5) ; y++) {
+		
+		int atX = tileSelectX;		
+		for (int x = startX ; x < (startX + 5) ; x++) {
+			
+			tileDirect(x, y, atX + (atY * 16) | (tilePlacePalette << 8));	
+
+			if (++atX > 15) {		//Rollover
+				atX = 0;
+			}
+			
+		}
+		if (++atY > 15) {			//Rollover
+			atY = 0;
+		}
+	}
+	
+	nextTileDrop = ((tileSelectX + 2) & 0x0F) + (((tileSelectY + 2) & 0x0F) * 16);
 	
 }
 
@@ -860,9 +1542,10 @@ void drawTitleScreen() {
 	}
 
 
-	drawText("start", 10, 10, false);
-	drawText("load", 10, 11, false);	
-	drawText("menu", 10, 12, false);
+	drawText("start", 10, 9, false);
+	drawText("load", 10, 10, false);	
+	drawText("edit", 10, 11, false);		
+	drawText("menu", 10, 12, false);	
 
 	setWindow(0, 0);
 	
@@ -1569,12 +2252,12 @@ void drawHallway(int floor) {
 	entryWindow = thingAdd(hallWindow, 80, 48);			//Get the index for this one
 	thingAdd(hallWindow, 1071, 48);	
 	
-	thingAdd(chandelier, 200, 8);
-	thingAdd(chandelier, 344, 8);	
-	thingAdd(chandelier, 488, 8);
-	thingAdd(chandelier, 664, 8);
-	thingAdd(chandelier, 808, 8);
-	thingAdd(chandelier, 952, 8);
+	thingAdd(chandelier, 200, 0);
+	thingAdd(chandelier, 344, 0);	
+	thingAdd(chandelier, 488, 0);
+	thingAdd(chandelier, 664, 0);
+	thingAdd(chandelier, 808, 0);
+	thingAdd(chandelier, 952, 0);
 
 	redrawCurrentHallway();
 	
@@ -2202,8 +2885,29 @@ void thingLogic() {
 	
 }
 
+void makeMessage(const char *text) {
 
+	for (int x = 0 ; x < 15 ; x++) {
+		message[x] = 0;
+	}
+	
+	int x = 0;
+	
+	while(*text) {
+		message[x++] = *text++;			//Just draw the characters from left to write
+	}
+	
+}	
 
+void clearMessage() {
+	
+	for (int x = 0 ; x < 15 ; x++) {
+		message[x] = 0;
+	}
+
+	redrawEditWindow();
+
+}	
 
 bool timer_isr(struct repeating_timer *t) {				//Every 33ms, set the flag that it's time to draw a new frame (it's possible system might miss one but that's OK)
 	nextFrameFlag = true;

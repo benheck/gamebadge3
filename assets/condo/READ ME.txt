@@ -1,0 +1,4 @@
+condo.dat - Condo palette
+condo.nes - Contains all condo tiles
+
+sofa.nes, stove etc - Unpacked full versions of individual things (like the full sofa)
