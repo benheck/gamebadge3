@@ -72,6 +72,10 @@ uint16_t xLevelStripRight = 26;			//Strip redraw position on right (when moving 
 #define tilePlatform		0x80
 #define tileBlocked			0x40
 
+int tileDropAttribute = 2;				//2 = 0x80 platform 3 = 0x40 blocked
+int tileDropAttributeMask = 0x80;			//0x80 platform 0x40 blocked
+
+
 #define hallBlank				0
 #define hallCounterWindow		1
 #define hallCounter				2
@@ -154,7 +158,7 @@ int drawX = 7;				//Cursor XY
 int drawY = 7;
 int cursorBlink	= 0;			//Cursor blinking
 bool cursorMenuShow = false;	//True = show selection stuff
-int cursorDrops = 0;			//0 = tiles 1 = sprites
+int cursorDrops = 0;			//0 = tiles, 1 = tile attributes, 2 = sprites
 int cursorMenu = 0;				//0 = tiles 1 = sprites
 bool editEntryFlag = false;		//Use to debounce A when entering edit mode
 int cursorMoveTimer = 0;		//During editing, if D-pad held for X frames we move full speed
@@ -913,20 +917,46 @@ void setupEdit() {
 		condoMap[14][x] = 0x5C | (tileBlocked << 8) | (3 << 8);
 	}
 	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
-		condoMap[13][x] = ' ' | (tilePlatform << 8)| (3 << 8);
+		condoMap[13][x] = ' ' | (3 << 8);
 	}		
 	for (int y = 0 ; y < 13 ; y++) {
 		condoMap[y][0] = 0x5B | (tileBlocked << 8)| (3 << 8);						//Left wall
 	}	
 	for (int y = 0 ; y < 13 ; y++) {
-		condoMap[y][condoWidth - 1] = 0x5B | (tileBlocked << 8)| (3 << 8);				//Right wall
+		condoMap[y][condoWidth - 1] = 0x5D | (tileBlocked << 8)| (3 << 8);				//Right wall
 	}
 
 	//Draw door
-	
-	
+	// const char tiles[4][9] = {
+		// { 0x99, 0x93, 0x93, 0x93, 0x93, 0x93, 0x93, 0x90, 0xA0 },
+		// { 0x9A, 0x94, 0x97, 0x94, 0x94, 0x80, 0x94, 0x91, 0xA1 },	
+		// { 0x9A, 0x94, 0x98, 0x94, 0x94, 0x80, 0x94, 0x91, 0xA2 },		
+		// { 0x9B, 0x95, 0x95, 0x96, 0x95, 0x95, 0x95, 0x92, 0xA3 },		
+	// };	
 
+	for (int g = 0 ; g < 8 ; g++) {
+		condoMap[13 - g][0] = 0x79 | (3 << 8);
+	}
 
+	const char tiles[4][9] = {
+		{ 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A },
+		{ 0x8A, 0x8A, 0x8C, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A },	
+		{ 0x8A, 0x8A, 0x8D, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A },		
+		{ 0x8A, 0x8A, 0x8A, 0x8B, 0x8A, 0x8A, 0x8A, 0x8A, 0x8A },		
+	};	
+
+	for (int x = 0 ; x < 4 ; x++) {		
+		for (int g = 0 ; g < 8 ; g++) {
+			condoMap[13 - g][x + 1] = tiles[x][g];
+		}		
+	}
+
+	updateMapFileName();						//Draw the room number on door
+	
+	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
+		condoMap[13][x] |= (tilePlatform << 8);		//Set platform on all tiles above the floor
+	}		
+	
 	editState = tileDrop;			//State of editor to start
 
 	displayPause = false;   		//Allow core 2 to draw
@@ -1052,10 +1082,12 @@ void drawEditMenuPopUp() {
 
 			case 5:		//Save
 				saveLevel();
+				manualAdebounce = true;
 			break;
 			
 			case 6:		//Load
 				loadLevel();
+				manualAdebounce = true;
 			break;				
 
 			case 7:		//Exit to menu
@@ -1082,6 +1114,9 @@ void updateMapFileName() {
 	mapFileName[12] = fileNameFloor;
 	mapFileName[14] = fileNameRoom;
 
+	condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
+	condoMap[8][3] = 0x80 + (fileNameRoom - 48);
+
 }
 
 void saveLevel() {
@@ -1089,7 +1124,11 @@ void saveLevel() {
 	saveFile(mapFileName);
 	
 	//return;
-	
+
+	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
+		condoMap[13][x] |= (tilePlatform << 8);		//Set platform on all tiles above the floor
+	}	
+
 	for (int y = 0 ; y < 15 ; y++) {				//Write the map file in horizontal strips from left to right, top to bottom
 		
 		for (int x = 0 ; x < condoWidth ; x++) {
@@ -1194,46 +1233,20 @@ void editLogic() {
 			makeMessage("SELECT TILE");
 		}
 
-		int atX = 0;					//Where to draw the window
-		int atY = 0;
+		switch(cursorDrops) {
 		
-		if (drawY < 7) {
-			atY = 10;
-		}
-		if (drawX < 7) {
-			atX = 10;
-		}
+			case 0:
+				windowTileSelect();
+			break;
 			
-		drawTileSelectWindow(atX, atY);
-
-		if (cursorBlink & 0x01) {
-			drawSprite((atX + 2) << 3, (atY + 2) << 3, 64, 7, false, false);		//Draw reticle on center select tile
-		}
+			case 1:
+				windowTileAttribute();
+			break;
 		
-		//Scroll around the available tiles
-		if (button(left_but)) {
-			if (--tileSelectX < 0) {
-				tileSelectX = 15;			//Roll over
-			}
-		}
-		if (button(right_but)) {
-			if (++tileSelectX > 15) {
-				tileSelectX = 0;			//Roll over
-			}
-		}
-		if (button(up_but)) {
-			if (--tileSelectY < 0) {
-				tileSelectY = 15;			//Roll over
-			}
-		}
-		if (button(down_but)) {
-			if (++tileSelectY > 15) {
-				tileSelectY = 0;			//Roll over
-			}
 		}
 	
 		cursorMenuShow = true;				//Flag to redraw BG when B is released
-	
+
 	}
 	else {										//Dropping tiles
 		
@@ -1319,6 +1332,31 @@ void editLogic() {
 		if (noMove == true) {			//No movement on dpad? Reset timer
 			cursorMoveTimer = 0;
 		}
+		
+		if (button(C_but)) {						//Cycle through drop types
+			if (++cursorDrops > 1) {
+				cursorDrops = 0;
+			}
+			switch(cursorDrops) {
+				case 0:
+					makeMessage("TILE PLACE");
+					messageTimer = 30;
+					redrawEditWindow();	
+				break;
+				
+				case 1:
+					makeMessage("TILE TYPE");
+					messageTimer = 30;
+					redrawEditWindow();					
+				break;
+				
+				case 2:
+					makeMessage("OBJECT PLACE");
+					messageTimer = 30;
+					redrawEditWindow();					
+				break;				
+			}
+		}			
 
 	}
 
@@ -1382,17 +1420,21 @@ void editLogic() {
 			case 5:		//Exit to menu
 				switchMenuTo(mainMenu);
 			break;
+			
+			case 6:		
+				condoMap[drawY][editWindowX + drawX] &= 0x0FFF;					//Mask off top nibble
+				condoMap[drawY][editWindowX + drawX] |= (tileDropAttributeMask << 8);	//Mask in attribute nibble
+				redrawEditWindow();	
+			break;
 		
 				
 		}
 
 	}
 	
-	if (button(C_but)) {						//Cycle through palettes
-		if (++tilePlacePalette > 3) {
-			tilePlacePalette = 0;
-		}
-	}	
+
+	
+	//cursorDrops
 
 	if (cursorBlink & 0x01) {
 		drawSprite(drawX << 3, drawY << 3, 64, 7, false, false);		//Reticle
@@ -1407,6 +1449,138 @@ void editLogic() {
 			redrawEditWindow();			
 		}
 	}
+	
+}
+
+void windowTileSelect() {
+	
+	int atX = 0;					//Where to draw the window
+	int atY = 0;
+	
+	if (drawY < 7) {
+		atY = 10;
+	}
+		
+	drawTileSelectWindow(atX, atY);
+
+	if (cursorBlink & 0x01) {
+		drawSprite((atX + 2) << 3, (atY + 2) << 3, 64, 7, false, false);		//Draw reticle on center select tile
+	}
+	
+	//Scroll around the available tiles
+	if (button(left_but)) {
+		if (--tileSelectX < 0) {
+			tileSelectX = 15;			//Roll over
+		}
+	}
+	if (button(right_but)) {
+		if (++tileSelectX > 15) {
+			tileSelectX = 0;			//Roll over
+		}
+	}
+	if (button(up_but)) {
+		if (--tileSelectY < 0) {
+			tileSelectY = 15;			//Roll over
+		}
+	}
+	if (button(down_but)) {
+		if (++tileSelectY > 15) {
+			tileSelectY = 0;			//Roll over
+		}
+	}
+
+	if (button(C_but)) {						//Cycle through palettes
+		if (++tilePlacePalette > 3) {
+			tilePlacePalette = 0;
+		}
+	}
+	
+	editAaction = 0;
+	
+}
+
+void drawTileSelectWindow(int startX, int startY) {
+	
+	int atY = tileSelectY;
+
+	for (int y = startY ; y < (startY + 5) ; y++) {
+		
+		int atX = tileSelectX;		
+		for (int x = startX ; x < (startX + 5) ; x++) {
+			
+			tileDirect(x, y, atX + (atY * 16) | (tilePlacePalette << 8));	
+
+			if (++atX > 15) {		//Rollover
+				atX = 0;
+			}
+			
+		}
+		if (++atY > 15) {			//Rollover
+			atY = 0;
+		}
+	}
+	
+	nextTileDrop = ((tileSelectX + 2) & 0x0F) + (((tileSelectY + 2) & 0x0F) * 16);
+	
+}
+
+void windowTileAttribute() {
+	
+	int atX = 0;					//Where to draw the window
+	int atY = 0;
+	
+	if (drawY < 7) {
+		atY = 10;
+	}
+	if (drawX < 7) {
+		atX = 10;
+	}
+			
+	drawTileSelectAttbWindow(atY);
+
+	if (button(up_but)) {
+		if (--tileDropAttribute < 2) {
+			tileDropAttribute = 4;			//Roll over
+		}
+		
+	}
+	if (button(down_but)) {
+		if (++tileDropAttribute > 4) {
+			tileDropAttribute = 2;			//Roll over
+		}
+	}
+	
+	switch(tileDropAttribute) {		
+		case 2:
+			tileDropAttributeMask = 0x00;			//platform
+		break;
+		
+		case 3:
+			tileDropAttributeMask = 0x80;			//platform
+		break;
+		
+		case 4:
+			tileDropAttributeMask = 0x40;			//blocked
+		break;
+	}
+
+	editAaction = 6;
+
+}
+
+void drawTileSelectAttbWindow(int startY) {
+	
+	fillTiles(0, startY, 14, startY + 4, ' ', 0);			//Clear area
+
+	drawText("TILE ATTRIBUTE", 1, startY, false);
+	
+	drawText("FREE MOVE", 2, startY + 2, false);
+	drawText("PLATFORM", 2, startY + 3, false);
+	drawText("BLOCKED", 2, startY + 4, false);
+	
+	if (cursorBlink & 0x01) {
+		drawText(">", 0, startY + tileDropAttribute, false);		
+	}	
 	
 }
 
@@ -1450,10 +1624,44 @@ void pasteFromBuffer() {
 
 void redrawEditWindow() {
 
-	for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
-		for (int xx = 0 ; xx < 15 ; xx++) {						//Draw across
-			tileDirect(xx, y, condoMap[y][editWindowX + xx]);
-		}
+	switch(cursorDrops) {
+	
+		case 0:
+			for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
+				for (int xx = 0 ; xx < 15 ; xx++) {						//Draw across
+					tileDirect(xx, y, condoMap[y][editWindowX + xx]);
+				}
+			}
+		break;
+		
+		case 1:
+			for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
+				for (int xx = 0 ; xx < 15 ; xx++) {						//Draw across
+				
+					uint16_t temp = condoMap[y][editWindowX + xx];			//Get the tile from map
+
+					switch(temp & 0xF000) {
+						case 0x8000:							//plat
+							tileDirect(xx, y, '(');
+						break;
+						
+						case 0x4000:							//blocked
+							tileDirect(xx, y, ')');
+						break;
+						
+						case 0xC000:
+							tileDirect(xx, y, '*');				//blocked + plat (do we need this?)
+						break;
+						
+						default:
+							tileDirect(xx, y, temp);			//Send as standard
+						break;			
+					}
+
+				}
+			}
+		break;
+	
 	}
 	
 	if (message[0] != 0) {		
@@ -1462,30 +1670,7 @@ void redrawEditWindow() {
 
 }
 
-void drawTileSelectWindow(int startX, int startY) {
-	
-	int atY = tileSelectY;
 
-	for (int y = startY ; y < (startY + 5) ; y++) {
-		
-		int atX = tileSelectX;		
-		for (int x = startX ; x < (startX + 5) ; x++) {
-			
-			tileDirect(x, y, atX + (atY * 16) | (tilePlacePalette << 8));	
-
-			if (++atX > 15) {		//Rollover
-				atX = 0;
-			}
-			
-		}
-		if (++atY > 15) {			//Rollover
-			atY = 0;
-		}
-	}
-	
-	nextTileDrop = ((tileSelectX + 2) & 0x0F) + (((tileSelectY + 2) & 0x0F) * 16);
-	
-}
 
 void spawnIntoLevel(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
 
@@ -2352,7 +2537,7 @@ void drawHallwayTiles(uint16_t levelStrip) {
 void hallwayBlankStrip(int whichStrip) {	//Hallway object 0
 
 	drawTile(xStripDrawing, 14, 0x9E, 3, tileBlocked);		//Draw floor as a solid blocking tile
-	
+
 	drawTile(xStripDrawing, 13, 0x9C, 3, tilePlatform);		//Draw baseboard trim
 
 	for (int g = 0 ; g < 13 ; g++) {

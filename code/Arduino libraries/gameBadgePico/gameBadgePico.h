@@ -12,6 +12,8 @@
 	
 	uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d);
 	
+	void backlight(bool state);
+	
 	bool button(int which);
 	void serviceDebounce();
 	bool loadRGB(const char* path);
@@ -32,6 +34,7 @@
 	void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags = 0x00);
 	void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette, int flags = 0x00);
 	void setTileType(int tileX, int tileY, int flags);
+	void tileDirect(int tileX, int tileY, uint16_t theData);
 	void setTilePalette(int tileX, int tileY, int whatPalette);
 	int getTileType(int tileX, int tileY);
 	int getTileValue(int tileX, int tileY);
@@ -60,6 +63,14 @@
 	void dmaAudio();
 	static void dma_handler_buffer0();
 	static void dma_handler_buffer1();	
+	
+	bool checkFile(const char* path);
+	void saveFile(const char* path);
+	bool loadFile(const char* path);
+	void writeByte(uint8_t theByte);
+	uint8_t readByte();
+	void closeFile();
+	
 	
 	
 	int32_t msc_read_cb (uint32_t lba, void* buffer, uint32_t bufsize);

@@ -25,6 +25,8 @@ FatFileSystem fatfs;                        		// file system object from SdFat
 FatFile file;										// Object to open files
 Adafruit_USBD_MSC usb_msc;                  		// USB Mass Storage object
 
+bool fileActive = false;				//True =  a file is open (reading level, playing audio) False = file not open, available for use
+
 #define LCD_WIDTH  240
 #define LCD_HEIGHT 240
 
@@ -68,6 +70,8 @@ bool fillBuffer1flag = false;
 bool endAudioBuffer0flag = false;
 bool endAudioBuffer1flag = false;
 int audio_pin_slice;
+
+bool backlightOnFlag = false;
 
 const int notes[] = {
     261, 277, 293, 311, 329, 349, 369, 391, 415, 440, 466, 493
@@ -173,6 +177,12 @@ uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d) {
 	 return wrap;
 }
 
+void backlight(bool state) {		//This is OFF on boot. Software control for sleep and also making boot cleaner
+
+	st7789_backlight(state);	
+	
+}
+
 void setGPIObutton(int which) {		//Used internally to setup button GPIO
 	gpio_init(which);
 	gpio_set_dir(which, GPIO_IN);
@@ -188,7 +198,9 @@ void setButtonDebounce(int which, bool useDebounce, uint8_t frames) {
 		frames = 1;
 	}
 
-	debounceStart[which] = frames;	
+	debounceStart[which] = frames;		
+	debounceTimer[which] = frames;						//Reset this as if a button has been pressed. This allows us to switch without false edges
+	
 }
 
 //Returns a boolean of the button state, using debounce settings
@@ -351,6 +363,10 @@ void setTileType(int tileX, int tileY, int flags) {
 	
 }
 
+void tileDirect(int tileX, int tileY, uint16_t theData) {			//Copies data directy into tile map
+	
+	nameTable[tileY][tileX] = theData;		
+}
 
 void setTilePalette(int tileX, int tileY, int whatPalette) {	
 
@@ -1240,6 +1256,58 @@ static void dma_handler_buffer1() {     //This is called when DMA audio block1 f
     // Clear interrupt for trigger DMA channel.
     dma_hw->ints0 = (1u << 2);
     
+}
+
+
+//File system stuff-----------for loading/saving levels etc--------------------------------
+bool checkFile(const char* path) {
+
+	if (file.exists(path)) {
+		return true;
+	}
+	else {
+		return false;
+	}	
+	
+}
+
+void saveFile(const char* path) {					//Opens a file for saving. Deletes the file if it already exists (write-over)
+
+	file.remove(path);
+	file.open(path, O_WRITE | O_CREAT);				//Open file for writing	
+	fileActive = true;
+	
+}
+
+bool loadFile(const char* path) {					//Opens a file for loading
+	
+	if (file.open(path, O_RDONLY) == false) {
+		return false;
+	}
+
+	fileActive = true;
+	
+	return true;
+	
+}
+
+void writeByte(uint8_t theByte) {					//Writes a byte to current file
+	
+	file.write(theByte);
+	
+}
+
+uint8_t readByte() {								//Reads a byte from the file
+	
+	return file.read();
+	
+}
+
+void closeFile() {									//Closes the active file
+
+	file.close();
+	fileActive = false;
+	
 }
 
 
