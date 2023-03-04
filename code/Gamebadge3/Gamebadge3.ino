@@ -1,5 +1,6 @@
 #include <gameBadgePico.h>
 #include "thingObject.h"
+#include "gameObject.h"
 //Your defines here------------------------------------
 #include "hardware/pwm.h"
 //#include <WiFi.h>
@@ -24,7 +25,7 @@ int dir = 0;
 
 int dutyOut;
 
-enum movement { rest, starting, walking, running, jumping, moving, turning, stopping, entering, exiting };
+enum movement { rest, starting, walking, running, jumping, moving, turning, swiping, stopping, entering, exiting };
 
 movement budState = rest;
 
@@ -36,6 +37,8 @@ int budSubFrame = 0;
 bool budDir = false;	//True = going left
 int budX = 56;
 int budY = 8;
+
+int budSwipe = 99;							//0 = not swiping, 1 2 3 swipe cycle
 
 uint16_t budWorldX = 8 * (6 + 7);			//Bud's position in the world (not the same as screen or tilemap)
 uint16_t budWorldY = 8;
@@ -110,6 +113,8 @@ int inArrowFrame = 0;
 #define maxThings		128
 thingObject thing[maxThings];
 
+gameObject object[maxThings];
+
 int totalThings = 0;
 int lastRemoved = 0xFF;
 int lastAdded = 0xFF;
@@ -117,7 +122,7 @@ int lastAdded = 0xFF;
 bool gameActive = false;
 bool isDrawn = false;													//Flag that tells new state it needs to draw itself before running logic
 
-enum stateMachine { bootingMenu, splashScreen, mainMenu, wifiMode, passwordEntry, login, gameRunning };		//State machine of the badge (boot, wifi etc)
+enum stateMachine { bootingMenu, splashScreen, mainMenu, pauseMode, wifiMode, passwordEntry, login, gameRunning };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
 enum stateMachineGame { titleScreen, titleScreen2, levelEdit, saveMap, loadMap, game };					//State machine of the game (under stateMachine = game)
@@ -147,14 +152,17 @@ int passwordCharEdit = 0;
 
 //WiFiMulti multi;
 
-const char* ssid = "Wireless Hub #42";
-const char* password = "BAD42FAB42";
+const char* ssid = "gdfgdfgdfgdf";
+const char* password = "dfgdfgdfgdfgdfgf";
 
 #define condoWidth	120  				//15 * 8
 
 static uint16_t condoMap[15][condoWidth];
 
-int drawX = 7;				//Cursor XY
+bool drawFine = false;		//Fine control for object drop on/off
+int drawXfine = 7 * 8;
+int drawYfine = 7 * 8;
+int drawX = 7;				//Cursor XY coarse
 int drawY = 7;
 int cursorBlink	= 0;			//Cursor blinking
 bool cursorMenuShow = false;	//True = show selection stuff
@@ -197,6 +205,30 @@ char mapFileName[20] = { 'l', 'e', 'v', 'e', 'l', 's', '/', 'c', 'o', 'n', 'd', 
 char fileNameFloor = '1';
 char fileNameRoom = '1';
 
+//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
+int robotSheetIndex[6][2] = { {0, 0}, {0, 8}, {0, 12}, {8, 0}, {8, 5}, {6, 3}  };
+int robotTypeSize[6][2] = { {2, 6}, {3, 3}, { 4, 2 }, { 4, 3 }, { 2, 2 }, {1, 1} };		//Size index
+int selectRobot = 0;
+
+uint16_t sentryLeft = 0;				//Left sentry edge of next object
+uint16_t sentryRight = 120;
+
+int objectSheetIndex[5][2];				//Stores the XY sprite sheet index of current object)
+int objectTypeSize[5][2] = { {0, 0}, {4, 2}, { 2, 2 }, { 2, 3 }, { 3, 2 } };		//Size index (category 0 is variable, rest are static)
+int objectTypeRange[5][2] = { {0, 99}, {0, 7}, { 0, 15 }, { 0, 3 }, { 0, 3 } };		//Selection index
+int objectDropCategory = 0;				//0= gameplay (enemies and greenies), 1 = bad art 4x2, 2 = small 2x2, 3= tall 2x3, 4= appliance 3x2
+int objectDropType = 0;					//index of object within its category
+int objectPlacePalette = 0;
+bool objectPlaceDir = false;
+bool editDisableCursor = false;			//Mostly just for object select menu
+
+int objectIndexNext = 0;				//Which object # drops next
+int objectIndexLast = 0;				//The one we dropped last (for setting vars on a placed object for instance)
+
+bool eraseFlag = false;
+
+bool testAnimateState = false;
+
 void setup() { //------------------------Core0 handles the file system and game logic
 
 	gamebadge3init();						//Init system
@@ -227,16 +259,11 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		serviceDebounce();				//Debounce buttons
 	}
 
-	if (displayPause == false) {   
-		if (button(select_but)) {      //Button pressed?
-		  displayPause = true;
-		  Serial.println("PAUSED");
-		}      
-	}
-	else {
-		if (button(select_but)) {      //Button pressed?
+	if (displayPause == true) {  		//If paused for USB xfer, push START to unpause 
+		if (button(start_but)) {        //Button pressed?
 		  displayPause = false;
-		  Serial.println("UNPAUSED");
+		  Serial.println("LCD DMA UNPAUSED");
+		  switchMenuTo(mainMenu);		//back to main menu
 		}    
 	}
 
@@ -353,8 +380,7 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 				}				
 			}
 			
-			if (button(A_but)) {
-			
+			if (button(A_but)) {			
 				switch(cursorY) {						
 					case 4:
 						switchMenuTo(wifiMode);
@@ -362,11 +388,25 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 					
 					case 5:
 						switchGameTo(titleScreen);												
-					break;				
+					break;
+					
+					case 6:
+						switchMenuTo(pauseMode);												
+					break;
+					
 				}	
 			}
 			
 
+			break;
+
+		case pauseMode:
+			if (isDrawn == false) {				//Draw menu...
+				drawPauseMenu();
+			}
+			else {
+				displayPause = true;			//and then pause on next frame
+			}	
 			break;
 			
 		case wifiMode:
@@ -600,6 +640,7 @@ void drawMainMenu() {
 
 	drawText("Connect WIFI", 2, 4, false);
 	drawText("Run GAME", 2, 5, false);
+	drawText("USB load", 2, 6, false);
 	
 	drawText("A=SELECT", 0, 14, false);
 
@@ -617,6 +658,24 @@ void drawMainMenu() {
 	
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;
+	
+}
+
+void drawPauseMenu() {
+	
+	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
+		    //0123456789ABCDE
+	drawText("LCD DMA PAUSED", 0, 0, false);
+	drawText(" TRANSFER USB", 0, 5, false);
+	drawText(" THUMB DRIVE", 0, 6, false);
+	drawText("  FILES NOW", 0, 7, false);
+	
+	drawText("START=UNPAUSE", 0, 14, false);
+	
+	setWindow(0, 0);	
+	
+	isDrawn = true;
+	displayPause = false;   		//Allow core 2 to draw
 	
 }
 
@@ -876,9 +935,14 @@ void switchGameTo(stateMachineGame x) {		//Switches state of game
 
 void setupEdit() {
 
-	loadPalette("condo/condo.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("condo/condo.nes", 0, 256);			//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
+	clearObjects();
 
+	loadPalette("condo/condo.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles
+	//BUD?
+	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
+	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots
+	
 	setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
 	setButtonDebounce(down_but, false, 0);
 	setButtonDebounce(left_but, false, 0);
@@ -890,14 +954,6 @@ void setupEdit() {
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
 	cursorMoveTimer = 0;
-
-	//fillTiles(0, 0, 14, 14, ' ', 3);			//Clear screen
-	
-	//condoMap[
-//#define tilePlatform		0x80
-//#define tileBlocked			0x40
-	
-	//Draw map basics	
 	
 	for (int x = 0 ; x < 8 ; x++) {							//8 screens wide
 		
@@ -925,14 +981,6 @@ void setupEdit() {
 	for (int y = 0 ; y < 13 ; y++) {
 		condoMap[y][condoWidth - 1] = 0x5D | (tileBlocked << 8)| (3 << 8);				//Right wall
 	}
-
-	//Draw door
-	// const char tiles[4][9] = {
-		// { 0x99, 0x93, 0x93, 0x93, 0x93, 0x93, 0x93, 0x90, 0xA0 },
-		// { 0x9A, 0x94, 0x97, 0x94, 0x94, 0x80, 0x94, 0x91, 0xA1 },	
-		// { 0x9A, 0x94, 0x98, 0x94, 0x94, 0x80, 0x94, 0x91, 0xA2 },		
-		// { 0x9B, 0x95, 0x95, 0x96, 0x95, 0x95, 0x95, 0x92, 0xA3 },		
-	// };	
 
 	for (int g = 0 ; g < 8 ; g++) {
 		condoMap[13 - g][0] = 0x79 | (3 << 8);
@@ -967,6 +1015,8 @@ void setupEdit() {
 	redrawEditWindow();	
 	
 	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
+	
+	editDisableCursor = false;
 	
 }
 
@@ -1141,10 +1191,27 @@ void saveLevel() {
 	}
 	
 	//SAVE OTHER METADATA HERE (robots, greenies, etc)
+
+	uint8_t objectCount = 0;
+
+	for (int x = 0 ; x < maxThings ; x++) {		//Count objects (they may not be contiguous)
+		if (object[x].active == true) {
+			objectCount++;
+		}
+	}
 	
+	writeByte(128);								//end of tile data
+	writeByte(objectCount);						//Write the count after tile data
+
+	for (int x = 0 ; x < maxThings ; x++) {		//Scan again
+		if (object[x].active == true) {			//If active, save the data
+			saveObject(x);
+		}
+	}
+	writeByte(255);								//end of object data
 	closeFile();								//Close the file when done (doesn't seem to be working???)
 	
-	makeMessage("SAVED!");
+	makeMessage("SAVED");
 	messageTimer = 30;
 	redrawEditWindow();	
 
@@ -1173,16 +1240,32 @@ void loadLevel() {
 		}		
 		
 	}	
+
+	if (readByte() == 128) {				//128 = end of tile data. Old files don't have this so skip objects if not found
+
+		uint8_t objectCount = readByte();			//Get # of objects saved in this file
 	
-	closeFile();								//Close the file when done
-	
-	redrawEditWindow();
-	
-	makeMessage("LOADED!");
-	messageTimer = 30;
-	redrawEditWindow();		
-	
-	
+		for (int x = 0 ; x < objectCount ; x++) {	//Load that many objects. They'll populate from 0 up
+			object[x].active = false;			    //Kill any existing object (overwrite)
+			loadObject(x);							//Load new data
+		}
+	}
+
+	if (readByte() == 255) {						//Check end (this should be a checksum)
+		closeFile();									
+		redrawEditWindow();		
+		makeMessage("LOADED");
+		messageTimer = 30;
+		redrawEditWindow();					
+	}
+	else {
+		closeFile();	
+		redrawEditWindow();		
+		makeMessage("LOAD ERROR");
+		messageTimer = 30;
+		redrawEditWindow();			
+	}
+
 }
 
 void editLogic() {
@@ -1221,19 +1304,23 @@ void editLogic() {
 	}
 
 
+	bool windowActive = false;
+
 	if (button(B_but)) {						//Selecting tiles or sprites?
 
-		if (bButtonFlag == false) {				//Just arrived?			
+		if (bButtonFlag == false) {						//Just switched to menus? Change debounces		
 			setButtonDebounce(up_but, true, 1);			//Debounce unless scrolling map left or right
 			setButtonDebounce(down_but, true, 1);
 			setButtonDebounce(left_but, true, 1);
 			setButtonDebounce(right_but, true, 1);	
+			setButtonDebounce(A_but, true, 0);			//A is debounced using auto system in menus
 			bButtonFlag = true;
-			
-			makeMessage("SELECT TILE");
-		}
 
-		switch(cursorDrops) {
+		}
+		
+		windowActive = true;
+		
+		switch(cursorDrops) {							//Draw whatever menu
 		
 			case 0:
 				windowTileSelect();
@@ -1242,25 +1329,38 @@ void editLogic() {
 			case 1:
 				windowTileAttribute();
 			break;
+			
+			case 2:
+				windowObjectSelect();
+			break;			
 		
 		}
 	
 		cursorMenuShow = true;				//Flag to redraw BG when B is released
 
 	}
-	else {										//Dropping tiles
+	else {										//Dropping things
 		
 		if (bButtonFlag == true) {						//We were in the B menu?	
 			setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
 			setButtonDebounce(down_but, false, 0);
 			setButtonDebounce(left_but, false, 0);
-			setButtonDebounce(right_but, false, 0);	
+			setButtonDebounce(right_but, false, 0);
+			setButtonDebounce(A_but, false, 0);
 			bButtonFlag = false;
 			clearMessage();
+			
+			if (cursorDrops == 2) {						//Dropping objects, enable debounce so they don't pile up
+				editDisableCursor = false;
+				editAaction = 10;
+				setButtonDebounce(A_but, true, 0);
+				makeMessage("PLACE OBJECT");
+				messageTimer = 20;						
+			}
 		}		
 			
 		if (cursorMenuShow == true) {				//B released and now we're back here? Redraw window
-			cursorMenuShow = true;
+			cursorMenuShow = false;
 			redrawEditWindow();
 		}	
 		bool noMove = true;
@@ -1268,15 +1368,24 @@ void editLogic() {
 		if (button(left_but)) {	
 			cursorMoveTimer++;			
 			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
-				if (drawX > 0) {
-					drawX -= 1;
+				
+				if (drawFine == true) {
+					if (drawXfine > 0) {			//Window doesn't scroll in fine mode
+						drawXfine -= 1;
+					}				
 				}
 				else {
-					if (editWindowX > 0) {
-						editWindowX--;	
-						redrawEditWindow();
+					if (drawX > 0) {
+						drawX -= 1;
 					}
-				}	
+					else {
+						if (editWindowX > 0) {
+							editWindowX--;	
+							redrawEditWindow();
+						}
+					}	
+					drawXfine = drawX << 3;
+				}
 
 				if (cursorMoveTimer > 100)	{
 					cursorMoveTimer = 100;
@@ -1287,15 +1396,24 @@ void editLogic() {
 		if (button(right_but)) {			
 			cursorMoveTimer++;		
 			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
-				if (drawX < 14) {
-					drawX += 1;
+					
+				if (drawFine == true) {
+					if (drawXfine < 112) {			//Window doesn't scroll in fine mode
+						drawXfine += 1;
+					}				
 				}
 				else {
-					if (editWindowX < 105) {
-						editWindowX++;	
-						redrawEditWindow();
+					if (drawX < 14) {
+						drawX += 1;
 					}
-				}	
+					else {
+						if (editWindowX < 105) {
+							editWindowX++;	
+							redrawEditWindow();
+						}
+					}	
+					drawXfine = drawX << 3;
+				}			
 
 				if (cursorMoveTimer > 100)	{
 					cursorMoveTimer = 100;
@@ -1306,21 +1424,39 @@ void editLogic() {
 		if (button(up_but)) {
 			cursorMoveTimer++;			
 			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
-				if (drawY > 0) {
-					drawY -= 1;
+			
+				if (drawFine == true) {
+					if (drawYfine > 0) {			//Window doesn't scroll in fine mode
+						drawYfine -= 1;
+					}				
+				}
+				else {					
+					if (drawY > 0) {
+						drawY -= 1;
+					}
+					drawYfine = drawY << 3;
 				}
 				if (cursorMoveTimer > 100)	{
 					cursorMoveTimer = 100;
-				}
+				}				
 			}
 			noMove = false;
 		}
 		if (button(down_but)) {
 			cursorMoveTimer++;			
 			if (cursorMoveTimer == 1 || cursorMoveTimer > 15) {		//Did it just start, or was held a while? Allow movement
-				if (drawY < 14) {
-					drawY += 1;
+			
+				if (drawFine == true) {
+					if (drawYfine < 112) {			//Window doesn't scroll in fine mode
+						drawYfine += 1;
+					}				
 				}
+				else {					
+					if (drawY < 14) {
+						drawY += 1;
+					}
+					drawYfine = drawY << 3;
+				}			
 
 				if (cursorMoveTimer > 100)	{
 					cursorMoveTimer = 100;
@@ -1334,25 +1470,29 @@ void editLogic() {
 		}
 		
 		if (button(C_but)) {						//Cycle through drop types
-			if (++cursorDrops > 1) {
+			if (++cursorDrops > 2) {
 				cursorDrops = 0;
 			}
+			
+			drawFine = false;
+			
 			switch(cursorDrops) {
 				case 0:
+					editAaction = 0;
 					makeMessage("TILE PLACE");
-					messageTimer = 30;
+					messageTimer = 20;
 					redrawEditWindow();	
 				break;
 				
 				case 1:
 					makeMessage("TILE TYPE");
-					messageTimer = 30;
+					messageTimer = 20;
 					redrawEditWindow();					
 				break;
 				
 				case 2:
 					makeMessage("OBJECT PLACE");
-					messageTimer = 30;
+					messageTimer = 20;
 					redrawEditWindow();					
 				break;				
 			}
@@ -1367,7 +1507,7 @@ void editLogic() {
 	}
 
 
-	if (button(A_but) && manualAdebounce == false) {
+	if (button(A_but) && manualAdebounce == false && windowActive == false) {
 		
 		switch (editAaction) {
 			
@@ -1421,10 +1561,55 @@ void editLogic() {
 				switchMenuTo(mainMenu);
 			break;
 			
-			case 6:		
+			case 6:		//Drop tile attributes
 				condoMap[drawY][editWindowX + drawX] &= 0x0FFF;					//Mask off top nibble
 				condoMap[drawY][editWindowX + drawX] |= (tileDropAttributeMask << 8);	//Mask in attribute nibble
 				redrawEditWindow();	
+			break;
+			
+			case 10:
+				switch(objectDropCategory) {					
+					case 0:		//Game stuff
+						placeObjectInMap();					//TEMP BJH - it mostly works?
+						if (selectRobot < 4) {			  //Evil robot? Prompt to set sentry edges
+							editAaction = 11;
+							makeMessage("SENTRY LEFT?");
+							messageTimer = 20;	
+							redrawEditWindow();
+						}
+						else {
+							editAaction = 10;				//Else just drop it (greenie/kitten)
+						}
+						
+					break;
+					
+					case 5:		//Eraser
+						eraseFlag = true;
+					break;
+					
+					default:
+						placeObjectInMap();
+					break;		
+				}
+			break;
+			
+			
+			case 11:					//Set sentry left edge
+				sentryLeft = (editWindowX << 3) + (drawX << 3);
+				makeMessage("SENTRY RIGHT?");
+				messageTimer = 20;	
+				redrawEditWindow();		
+				editAaction = 12;
+			break;
+			
+			case 12:					//Set sentry right edge
+				sentryRight = (editWindowX << 3) + (drawX << 3) + 8;	//The right edge of the recticle is the edge (+8)
+				makeMessage("STORED");
+				messageTimer = 20;	
+				redrawEditWindow();	
+				editAaction = 10;
+				object[objectIndexLast].xSentryLeft = sentryLeft;
+				object[objectIndexLast].xSentryRight = sentryRight;
 			break;
 		
 				
@@ -1432,25 +1617,189 @@ void editLogic() {
 
 	}
 	
-
-	
-	//cursorDrops
-
-	if (cursorBlink & 0x01) {
-		drawSprite(drawX << 3, drawY << 3, 64, 7, false, false);		//Reticle
+	if (editDisableCursor == false) {			//Can cursor be shown?
+		
+		if (windowActive == true) {
+			if (cursorDrops == 0) {				//Dropping tiles?
+				drawSprite(drawX << 3, drawY << 3, nextTileDrop, tilePlacePalette, false, false);		//Just draw next tile, no reticle as we can't move anyway. Makes it easier to see how it fits		
+			}
+			if (cursorDrops == 1) {
+				switch(tileDropAttribute) {
+					case 3:							
+						drawSprite(drawX << 3, drawY << 3, '.', 0, false, false);		//plat
+					break;
+					
+					case 4:							
+						drawSprite(drawX << 3, drawY << 3, ',', 0, false, false);		//blocked
+					break;
+					
+					default:
+						drawSprite(drawX << 3, drawY << 3, 64, 7, false, false);		//Reticle (free, null)
+					break;			
+				}				
+			}			
+		}
+		else {
+			if (cursorBlink & 0x01) {
+				if (drawFine == false) {
+					drawSprite(drawX << 3, drawY << 3, 64, 7, false, false);					//Alternate between reticle and object to drop
+				}
+			}
+			else {
+				switch(cursorDrops) {
+					case 0:
+						drawSprite(drawX << 3, drawY << 3, nextTileDrop, tilePlacePalette, false, false);		//Next tile (as sprite)
+					break;
+					
+					case 1:
+						switch(tileDropAttribute) {
+							case 3:							
+								drawSprite(drawX << 3, drawY << 3, '.', 0, false, false);		//plat
+							break;
+							
+							case 4:							
+								drawSprite(drawX << 3, drawY << 3, ',', 0, false, false);		//blocked
+							break;			
+						}						
+					break;
+					
+					case 2:
+					
+						if (objectDropCategory == 5) {
+							drawSprite(drawX << 3, drawY << 3, 0x2C, 3, false, false);							
+						}
+						else {
+							if (drawFine == true) {
+								drawSprite(drawXfine, drawYfine, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);
+							}	
+							else {
+								drawSprite(drawX << 3, drawY << 3, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);							
+							}								
+						}
+						if (button(select_but)) {
+							if (drawFine == false) {
+								drawFine = true;
+								makeMessage("FINE POS");
+								messageTimer = 15;
+								redrawEditWindow();	
+								drawXfine = drawX * 8;
+								drawYfine = drawY * 8;
+							}
+							else {
+								drawFine = false;
+								makeMessage("COARSE POS");
+								messageTimer = 15;
+								redrawEditWindow();	
+								drawX = drawXfine >> 3;
+								drawY = drawYfine >> 3;
+							}
+						}
+					break;	
+				}	
+			}						
+		}
 	}
-	else {
-		drawSprite(drawX << 3, drawY << 3, nextTileDrop, tilePlacePalette, false, false);		//Next tile (as sprite)
-	}
-	
+
 	if (messageTimer > 0) {
 		if (--messageTimer == 0) {
 			clearMessage();
 			redrawEditWindow();			
 		}
 	}
+
+
+	if (windowActive == false) {			//Don't draw sprite objects in menu
+		editorDrawObjects();
+	}
 	
 }
+
+void placeObjectInMap() {
+
+	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		if (object[x].active == false) {
+			objectIndexNext = x;
+			break;
+		}				
+	}
+	
+	Serial.print("Placing object #");
+	Serial.println(objectIndexNext);
+	
+	object[objectIndexNext].active = true;
+	object[objectIndexNext].xPos = (editWindowX << 3) + drawXfine;
+	object[objectIndexNext].yPos = drawYfine;
+	object[objectIndexNext].sheetX = objectSheetIndex[objectDropCategory][0];
+	object[objectIndexNext].sheetY = objectSheetIndex[objectDropCategory][1];
+	object[objectIndexNext].width = objectTypeSize[objectDropCategory][0];
+	object[objectIndexNext].height = objectTypeSize[objectDropCategory][1];
+	object[objectIndexNext].palette = objectPlacePalette;
+	object[objectIndexNext].dir = objectPlaceDir;
+	
+	object[objectIndexNext].xSentryLeft = sentryLeft;
+	object[objectIndexNext].xSentryRight = sentryRight;
+	
+	object[objectIndexNext].category = objectDropCategory;			//0 = gameplay elements >0 BG stuff
+	
+	if (objectDropCategory == 0) {
+		object[objectIndexNext].type = selectRobot;
+	}
+	else {
+		object[objectIndexNext].type = objectDropType;
+	}
+	
+	objectIndexLast = objectIndexNext;			//Store the index so when we complete the sentry entry we know where to store it
+
+}
+
+void testAnimateObjects(bool onOff) {
+
+	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		if (object[x].active == true && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
+			object[x].extraX = onOff;
+		}
+	}	
+	
+}
+
+
+void clearObjects() {
+
+	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		object[x].active = false;				
+	}	
+	
+}
+
+
+void editorDrawObjects() {
+	
+	for (int g = 0 ; g < maxThings ; g++) {
+		
+		if (object[g].active) {
+			object[g].scan(editWindowX << 3, 0);			//See if object visible
+			
+			if (objectDropCategory == 5 && eraseFlag == true) {
+				
+				if (object[g].hitBox((editWindowX << 3) + (drawX << 3), drawY << 3, (editWindowX << 3) + (drawX << 3) + 8, (drawY << 3) + 8) == true) {	//Does the 8x8 reticle fall within the object bounds?
+					object[g].active = 0;	
+					eraseFlag = false;
+					Serial.print("Erasing object #");
+					Serial.println(g);
+				}
+		
+			}
+	
+		}
+		
+	}
+	
+	if (eraseFlag == true) {		
+		eraseFlag = false;	
+	}
+	
+}
+
 
 void windowTileSelect() {
 	
@@ -1458,13 +1807,16 @@ void windowTileSelect() {
 	int atY = 0;
 	
 	if (drawY < 7) {
-		atY = 10;
+		atY = 8;
 	}
-		
+	if (drawX < 7) {
+		atX = 8;
+	}
+	
 	drawTileSelectWindow(atX, atY);
 
 	if (cursorBlink & 0x01) {
-		drawSprite((atX + 2) << 3, (atY + 2) << 3, 64, 7, false, false);		//Draw reticle on center select tile
+		drawSprite((atX + 3) << 3, (atY + 3) << 3, 64, 7, false, false);		//Draw reticle on center select tile
 	}
 	
 	//Scroll around the available tiles
@@ -1503,10 +1855,10 @@ void drawTileSelectWindow(int startX, int startY) {
 	
 	int atY = tileSelectY;
 
-	for (int y = startY ; y < (startY + 5) ; y++) {
+	for (int y = startY ; y < (startY + 7) ; y++) {
 		
 		int atX = tileSelectX;		
-		for (int x = startX ; x < (startX + 5) ; x++) {
+		for (int x = startX ; x < (startX + 7) ; x++) {
 			
 			tileDirect(x, y, atX + (atY * 16) | (tilePlacePalette << 8));	
 
@@ -1520,7 +1872,7 @@ void drawTileSelectWindow(int startX, int startY) {
 		}
 	}
 	
-	nextTileDrop = ((tileSelectX + 2) & 0x0F) + (((tileSelectY + 2) & 0x0F) * 16);
+	nextTileDrop = ((tileSelectX + 3) & 0x0F) + (((tileSelectY + 3) & 0x0F) * 16);
 	
 }
 
@@ -1552,7 +1904,7 @@ void windowTileAttribute() {
 	
 	switch(tileDropAttribute) {		
 		case 2:
-			tileDropAttributeMask = 0x00;			//platform
+			tileDropAttributeMask = 0x00;			//free
 		break;
 		
 		case 3:
@@ -1581,6 +1933,146 @@ void drawTileSelectAttbWindow(int startY) {
 	if (cursorBlink & 0x01) {
 		drawText(">", 0, startY + tileDropAttribute, false);		
 	}	
+	
+}
+
+void windowObjectSelect() {
+
+	drawObjectSelectWindow();
+
+	if (button(left_but)) {		
+		switch(objectDropCategory) {
+			case 0:
+				if (--selectRobot < 0) {
+					selectRobot = 5;
+				}			
+			break;			   
+			default:	
+				if (--objectDropType < objectTypeRange[objectDropCategory][0]) {
+					objectDropType = objectTypeRange[objectDropCategory][1];			//Roll over
+				}
+			break;
+		}
+	}
+	if (button(right_but)) {
+		
+		switch(objectDropCategory) {
+			case 0:
+				if (++selectRobot > 5) {
+					selectRobot = 0;
+				}			
+			break;	
+
+			case 6:
+				testAnimateState = !testAnimateState;
+				testAnimateObjects(testAnimateState);			
+			break;
+			
+			default:	
+				if (++objectDropType > objectTypeRange[objectDropCategory][1]) {
+					objectDropType = objectTypeRange[objectDropCategory][0];			//Roll over
+				}
+			break;
+		}		
+
+	}
+	
+	//0= gameplay (enemies and greenies), 1 = bad art 4x2, 2 = small 2x2, 3= tall 2x3, 4= gizmos 3x2 5=erase
+	if (button(up_but)) {
+		if (--objectDropCategory < 0) {
+			objectDropCategory = 6;			//Roll over
+		}
+	}
+	if (button(down_but)) {
+		if (++objectDropCategory > 6) {
+			objectDropCategory = 0;			//Roll over
+		}
+	}
+
+	if (button(C_but)) {						//Cycle through 8 palettes
+		if (++objectPlacePalette  > 7) {
+			objectPlacePalette  = 0;
+		}
+	}	
+	
+	if (button(A_but)) {						//Flip left/right
+		objectPlaceDir = !objectPlaceDir;
+	}	
+	
+	editAaction = 10;							//Disable main edit A	
+	editDisableCursor = true;
+	
+}
+
+void drawObjectSelectWindow() {
+	
+	fillTiles(0, 0, 14, 8, ' ', 0);							//Clear area
+	
+       //0123456789ABCDE
+	drawText(")  TYPE  *", 5, 1, false);
+	
+// int objectDropCategory = 1;				//0= gameplay (enemies and greenies), 1 = bad art 4x2, 2 = small 2x2, 3= tall 2x3, 4= appliance 3x2, 5= eraser
+// int objectDropType= 0;					//index of object within its category
+
+//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
+//int robotSheetIndex[5][2] = { {0, 0}, {0, 8}, {0, 12}, {8, 0}, {6, 3} };
+//int robotTypeSize[5][2] = { {2, 6}, {3, 3}, { 4, 2 }, { 4, 3 }, { 2, 2 } };		//Size index
+
+
+	switch(objectDropCategory) {
+		       //0123456789ABCDE
+		case 0:
+			drawText("GAME PLAY", 5, 2, false);
+			objectSheetIndex[objectDropCategory][0] = robotSheetIndex[selectRobot][0];			//Get sheet XY and offset by page 3
+			objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 48;	
+			
+			objectTypeSize[objectDropCategory][0] = robotTypeSize[selectRobot][0];
+			objectTypeSize[objectDropCategory][1] = robotTypeSize[selectRobot][1];
+			
+			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+		break;			   
+		case 1:
+			drawText("BAD ART", 5, 2, false);		//type 0-7			
+			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x01) << 2);
+			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 1) << 1) + 32;	
+			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+		break;
+		case 2:
+			drawText("KITCHEN", 5, 2, false);		//type 0-15
+			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x03) << 1) + 8;
+			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 2) << 1) + 32;	
+			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+			
+		break;		
+		case 3:
+			drawText("TALL STUFF", 5, 2, false);	//type 0-3
+			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x03) << 1) + 8;
+			objectSheetIndex[objectDropCategory][1] = 32 + 8;
+			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);				
+		break;		
+		case 4:
+			drawText("APPLIANCE", 5, 2, false);		//type 0-3
+			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x01) << 2) + 8;
+			objectSheetIndex[objectDropCategory][1] = 32 + 11 + ((objectDropType >> 1) << 1);
+			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);				
+		break;	
+		case 5:
+			drawText("ERASE", 5, 2, false);		//type 0-3
+			drawSprite(16, 16, 0x2C, 3, false, false);
+		break;	
+
+		case 6:
+			drawText("TEST ANI", 5, 2, false);		//type 0-3			
+		break;
+		
+	}
+	
+	drawText("<  ITEM  >", 5, 4, false);
+	
+	drawText("A=FLIP H", 5, 6, false);		//Starting dir of robots, no effect on greenes
+	drawText("C=COLOR", 5, 7, false);		//No effect on greenies because, duh, they're GREEN ONLY
+		    //0123456789ABCDE	
+	drawText("SEL=FINE/COARSE", 0, 8, false);		//No effect on greenies because, duh, they're GREEN ONLY
 	
 }
 
@@ -1627,6 +2119,7 @@ void redrawEditWindow() {
 	switch(cursorDrops) {
 	
 		case 0:
+		case 2:
 			for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
 				for (int xx = 0 ; xx < 15 ; xx++) {						//Draw across
 					tileDirect(xx, y, condoMap[y][editWindowX + xx]);
@@ -1642,19 +2135,15 @@ void redrawEditWindow() {
 
 					switch(temp & 0xF000) {
 						case 0x8000:							//plat
-							tileDirect(xx, y, '(');
+							tileDirect(xx, y, '.');
 						break;
 						
 						case 0x4000:							//blocked
-							tileDirect(xx, y, ')');
-						break;
-						
-						case 0xC000:
-							tileDirect(xx, y, '*');				//blocked + plat (do we need this?)
+							tileDirect(xx, y, ',');
 						break;
 						
 						default:
-							tileDirect(xx, y, temp);			//Send as standard
+							tileDirect(xx, y, temp);			//Send as standard (free)
 						break;			
 					}
 
@@ -1670,6 +2159,89 @@ void redrawEditWindow() {
 
 }
 
+
+void saveObject(int which) {
+
+	writeBool(object[which].active);
+	writeBool(object[which].visible);
+	writeByte(object[which].state);
+	writeByte(object[which].whenBudTouch);
+	writeByte(object[which].xPos >> 8);
+	writeByte(object[which].xPos & 0x00FF);
+	writeByte(object[which].yPos >> 8);
+	writeByte(object[which].yPos & 0x00FF);
+
+	writeBool(object[which].singleTile);
+	writeByte(object[which].sheetX);	
+	writeByte(object[which].sheetY);
+	writeByte(object[which].width);
+	writeByte(object[which].height);
+	writeByte(object[which].palette);
+	writeByte(object[which].category);	//0= gameplay (enemies and greenies), 1 = bad art 4x2, 2 = small 2x2, 3= tall 2x3, 4= appliance 3x2, 5= eraser
+	writeByte(object[which].type);		//What kind of object this is within category
+	
+	writeBool(object[which].dir);		
+	
+	writeBool(object[which].turning);
+	writeByte(object[which].animate);	
+	writeByte(object[which].subAnimate);	
+
+	writeByte(object[which].xSentryLeft >> 8);
+	writeByte(object[which].xSentryLeft & 0x00FF);	
+	writeByte(object[which].xSentryRight >> 8);	
+	writeByte(object[which].xSentryRight & 0x0FF);	
+	
+	writeBool(object[which].extraX);					
+	writeBool(object[which].extraY);
+			
+	writeByte(object[which].extraA);	
+	writeByte(object[which].extraB);	
+	writeByte(object[which].extraC);	
+	writeByte(object[which].extraD);	
+	
+	
+}
+
+void loadObject(int which) {
+
+	object[which].active = readBool();
+	object[which].visible = readBool();
+	object[which].state = readByte();
+	object[which].whenBudTouch = readByte();
+	object[which].xPos = readByte() << 8;
+	object[which].xPos |= readByte();
+	object[which].yPos = readByte() << 8;
+	object[which].yPos |= readByte();
+
+	object[which].singleTile = readBool();
+	object[which].sheetX = readByte();	
+	object[which].sheetY = readByte();
+	object[which].width = readByte();
+	object[which].height = readByte();	
+	object[which].palette = readByte();	
+	object[which].category = readByte();	
+	object[which].type = readByte();	
+	
+	object[which].dir = readBool();		
+	
+	object[which].turning = readBool();
+	object[which].animate = readByte();		
+	object[which].subAnimate = readByte();		
+	
+	object[which].xSentryLeft = readByte() << 8;
+	object[which].xSentryLeft |= readByte();
+	object[which].xSentryRight = readByte() << 8;
+	object[which].xSentryRight |= readByte();	
+	
+	object[which].extraX = readBool();				
+	object[which].extraY = readBool();
+			
+	object[which].extraA = readByte();		
+	object[which].extraB = readByte();		
+	object[which].extraC = readByte();		
+	object[which].extraD = readByte();		
+	
+}
 
 
 void spawnIntoLevel(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
@@ -1919,6 +2491,18 @@ void budLogic() {
 				}		
 			}
 			break;	
+
+		case swiping:
+			if (budDir == true) {
+				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				setBudHitBox(budWorldX - 16, budWorldY - 16, budWorldX + 16, budWorldY + 8);
+			}
+			else {
+				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				setBudHitBox(budWorldX, budWorldY - 16, budWorldX + 32, budWorldY + 8);
+			}	
+			break;
+
 	
 		case entering:
 			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
@@ -2009,7 +2593,26 @@ void budLogic() {
 			//budState = jumping;	
 		}
 		
-	}		
+	}
+
+	if (budSwipe < 99 && animateBud == true) {
+		if (++budSwipe > 2) {
+			budSwipe = 99;
+			budState = rest;
+		}
+	}
+
+	if (button(B_but) && jump == 0) {		//Can't swipe while jumping
+	
+		if (budSwipe == 99) {
+			budSwipe = 0;	
+			budState = swiping;
+		}
+		
+		thingAdd(bigRobot, 100, 64);
+	
+	}
+
 	
 	if (button(left_but)) {
 		budDir = true;
@@ -2125,14 +2728,14 @@ void budLogic() {
 		
 	}
 	
-	if (button(B_but)) {
-		thingAdd(bigRobot, 100, 64);
-		//playAudio("audio/getread.wav");
-		//playAudio("audio/back.wav");
-		//drawText("supercalifraguliosdosis", 0, 14, true);
-		//pwm_set_freq_duty(6, 261, 25);
-		//pwm_set_freq_duty(8, 277, 50);
-	}	
+	// if (button(B_but)) {
+		// thingAdd(bigRobot, 100, 64);
+		// //playAudio("audio/getread.wav");
+		// //playAudio("audio/back.wav");
+		// //drawText("supercalifraguliosdosis", 0, 14, true);
+		// //pwm_set_freq_duty(6, 261, 25);
+		// //pwm_set_freq_duty(8, 277, 50);
+	// }	
 	
 	if (button(A_but)) {
 		switchMenuTo(mainMenu);
@@ -2147,8 +2750,12 @@ void budLogic() {
 void setupHallway() {
 
 	loadPalette("hallway/hallway.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("hallway/hallway.nes", 0, 1024);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
+	loadPattern("hallway/hallway.nes", 0, 256);		//Load hallway tiles into page 0
+	
+	loadPattern("sprites/bud.nes", 256, 256);		//Load bud sprite tiles into page 1	
+	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
+	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots	
+	
 	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
 	setButtonDebounce(down_but, false, 0);
 	setButtonDebounce(left_but, false, 0);

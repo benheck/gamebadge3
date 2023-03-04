@@ -40,25 +40,25 @@ void thingObject::scan(uint16_t worldX, uint16_t worldY) {
 		
 		case 1:
 			if (turning == false) {
-				drawSprite(xPos - worldX, yPos, 0, 32, 2, 6, 7, dir, false);
+				drawSprite(xPos - worldX, yPos, 0, 48, 2, 6, 7, dir, false);
 			}
 			else {
-				drawSprite(xPos - worldX, yPos, 2, 32, 2, 6, 7, false, false);
+				drawSprite(xPos - worldX, yPos, 2, 48, 2, 6, 7, false, false);
 			}		
 		break;
 			
 		case 9:
 			if (animate < 8) {
-				drawSprite((xPos - worldX) + 4, yPos + 5, 6, 32, 1, 2, 7, false, false);						//X face
+				drawSprite((xPos - worldX) + 4, yPos + 5, 6, 48, 1, 2, 7, false, false);						//X face
 			}
 			else {
 				if (animate < 16) {
-					drawSprite((xPos - worldX) + 4, yPos + 5, animate - 8, 32 + 6, 1, 2, 7, false, false);		//Reboot progress bar
+					drawSprite((xPos - worldX) + 4, yPos + 5, animate - 8, 48 + 6, 1, 2, 7, false, false);		//Reboot progress bar
 				}
 			}
 				
-			drawSprite(xPos - worldX, yPos, 4, 32, 2, 3, 7, false, false);			//Draw blank face
-			drawSprite(xPos - worldX, yPos + 24, 2, 32 + 3, 2, 3, 7, false, false);	//Draw body
+			drawSprite(xPos - worldX, yPos, 4, 48, 2, 3, 7, false, false);			//Draw blank face
+			drawSprite(xPos - worldX, yPos + 24, 2, 48 + 3, 2, 3, 7, false, false);	//Draw body
 	
 		break;
 		
@@ -116,7 +116,7 @@ void thingObject::scanC1(uint16_t worldX, uint16_t worldY) {
 	}
 
 	//OK object must in the window
-	drawSprite(xPos - worldX, yPos, 12, 32, 4, 3, 7, false, false);
+	drawSprite(xPos - worldX, yPos, 4, 32 + 8, 4, 3, 7, false, false);
 
 	visible = true;
 
@@ -137,7 +137,7 @@ void thingObject::scanC2(uint16_t worldX, uint16_t worldY) {
 	}
 
 	//OK object must in the window
-	drawSprite(xPos - worldX, yPos, 12, 32 + 3, 4, 1, 7, false, false);
+	drawSprite(xPos - worldX, yPos, 4, 32 + 8 + 3, 4, 1, 7, false, false);
 
 	visible = true;
 
@@ -158,11 +158,11 @@ void thingObject::scanC3(uint16_t worldX, uint16_t worldY) {
 	switch(state) {
 		
 		case 0:
-			drawSprite(xPos - worldX, yPos, 12, 32 + 4, 4, 3, 6, false, false);
+			drawSprite(xPos - worldX, yPos, 4, 32 + 12, 4, 3, 6, false, false);
 		break;
 			
 		case 1:
-			drawSprite(xPos - worldX, yPos, 8, 32 + 4, 4, 3, 6, false, false);	
+			drawSprite(xPos - worldX, yPos, 0, 32 + 12, 4, 3, 6, false, false);	
 		break;
 		
 	}	
@@ -194,7 +194,7 @@ void thingObject::scanC4(uint16_t worldX, uint16_t worldY) {
 	}
 
 	if ((++animate & 0x01) == 0x01) {
-		drawSprite(xPos - worldX, yPos, 8, 32, 4, 3, 6, flipIt, false);	
+		drawSprite(xPos - worldX, yPos, 0, 32 + 8, 4, 3, 6, flipIt, false);	
 	}
 
 	
