@@ -54,6 +54,8 @@ void st7789_init(const struct st7789_config* config, uint16_t width, uint16_t he
     gpio_set_dir(st7789_cfg.gpio_rst, GPIO_OUT);
     gpio_set_dir(st7789_cfg.gpio_bl, GPIO_OUT);
 
+	gpio_put(st7789_cfg.gpio_bl, 1);
+
     if (st7789_cfg.gpio_cs > -1) {
         gpio_put(st7789_cfg.gpio_cs, 1);
     }
@@ -98,8 +100,18 @@ void st7789_init(const struct st7789_config* config, uint16_t width, uint16_t he
     // DISPON (29h): Display On
     st7789_cmd(0x29, NULL, 0);
     sleep_ms(10);
+	 
+}
 
-    gpio_put(st7789_cfg.gpio_bl, 1);	 
+void st7789_backlight(bool state) {
+
+	if (state == true) {
+		gpio_put(st7789_cfg.gpio_bl, 1);
+	}
+	else {
+		gpio_put(st7789_cfg.gpio_bl, 0);
+	}
+	
 }
 
 void st7789_cmd(uint8_t cmd, const uint8_t* data, size_t len)
