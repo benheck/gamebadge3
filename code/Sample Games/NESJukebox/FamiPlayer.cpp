@@ -27,7 +27,7 @@ void FamiPlayer::serviceTracks()
                 uint16_t note = tracks[i].chPulse1[noteCtr] >> 4;           // Cleave the volume bits, result is the note index
                 uint16_t volume = tracks[i].chPulse1[noteCtr] & 0x000F;     // Grab the volume bits
                 uint16_t freq = noteFreq[note];                             // Convert the note index to the correct frequency
-                uint8_t dutyCycle = volume * 3 + 2;                         // Set the volume by adjusting the duty cycle
+                uint8_t dutyCycle = volume * 3 + (volume > 0 ? 5 : 0);          // Set the volume by adjusting the duty cycle
                 pwm_set_freq_duty(PULSE1, freq, dutyCycle);
             }
             if (tracks[i].chPulse2 != nullptr)                              // There's data on the PULSE2 channel
@@ -35,7 +35,7 @@ void FamiPlayer::serviceTracks()
                 uint16_t note = tracks[i].chPulse2[noteCtr] >> 4;
                 uint16_t volume = tracks[i].chPulse2[noteCtr] & 0x000F;
                 uint16_t freq = noteFreq[note];
-                uint8_t dutyCycle = volume * 3 + 2;
+                uint8_t dutyCycle = volume * 3 + (volume > 0 ? 5 : 0);
                 pwm_set_freq_duty(PULSE2, freq, dutyCycle);
             }
             if (tracks[i].chTriangle != nullptr)                            // There's data on the TRIANGLE channel
@@ -47,7 +47,7 @@ void FamiPlayer::serviceTracks()
             {
                 uint16_t note = tracks[i].chNoise[noteCtr] >> 4;
                 uint16_t volume = tracks[i].chNoise[noteCtr] & 0x000F;
-                noiseVolume = volume * 2;
+                noiseVolume = volume;
                 noiseNote = noiseMap[note];
             }
             tracks[i].noteCounter = (tracks[i].noteCounter + 1) % tracks[i].numNotes;
