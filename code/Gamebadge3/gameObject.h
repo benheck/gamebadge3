@@ -16,12 +16,20 @@ class gameObject
 
 	void scan(uint16_t worldX, uint16_t worldY);
 	bool hitBox(int16_t x1, int16_t y1, int16_t x2, int16_t y2);
+	bool hitBoxSmall(int16_t x1, int16_t y1, int16_t x2, int16_t y2);
 
+	//State:
+	//0 = no effect
+	//99 = falling
+	//100 = fell, smashed on floor (floor is constant)
+	//101 = fell, damaged a robot
+	//200 = kitten rescue float
+	//255 - test animate
 
 	bool active = false;						//True = active (logic can execute, ie enemy moves)
-	bool visible;								//True = onscreen false = offscreen. If false, don't run hitbox
-	uint8_t state;								//Falling, turning, intact, destroyed etc
-	uint8_t whenBudTouch;						//0 = nothing, 1 = knock over, 2 = collect (greenie), 3 = kill (monster)
+	bool visible = false;						//True = onscreen false = offscreen. If false, don't run hitbox
+	uint8_t state = 0;							//Falling, turning, intact, destroyed, test animate etc
+	uint8_t whenBudTouch = 0;					//0 = nothing, 1 = knock over, 2 = collect (greenie), 3 = kill (monster)
 	
     uint16_t xPos, yPos;						//Position in world, is upper left corner of sprite
 	bool singleTile = false;					//Greenies are single cell, rest are bigger	
@@ -34,7 +42,7 @@ class gameObject
 	
 	bool dir = false;							//False = facing right (not flipped) Sprites should be drawn facing right as default (false)
 	
-	bool turning;
+	bool turning = false;
 	uint8_t animate = 0;
 	uint8_t subAnimate = 0;
 	

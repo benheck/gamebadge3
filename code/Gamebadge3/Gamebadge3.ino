@@ -6,6 +6,8 @@
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
+char testX = 0;
+
 bool firstFrame = false;
 bool displayPause = true;
 
@@ -40,6 +42,10 @@ uint16_t budWorldX = 8 * (6 + 7);			//Bud's position in the world (not the same 
 uint16_t budWorldY = 8;
 
 uint16_t budWx1, budWx2, budWy1, budWy2;	//Upper left and lower right edge of Bud's hit box. It changes depending on what he's doing
+
+uint16_t budAx1, budAx2, budAy1, budAy2;	//Upper left and lower right edge of Bud's attack hit box
+
+
 
 int tail = 0;
 int blink = 0;
@@ -210,6 +216,14 @@ int objectIndexLast = 0;				//The one we dropped last (for setting vars on a pla
 bool eraseFlag = false;
 
 bool testAnimateState = false;
+
+int currentMap = 0;						//1 = hallway, 2 = condo
+
+int highestObjectIndex = 0;				//Counts up as a level loads. When running logic/collision checks, don't search past this
+
+int kittenTotal = 0;					//# of kittens per level
+int kittenCount = 0;					//How many player has recused
+int kittenMessageTimer = 0;
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -541,6 +555,7 @@ void gameFrame() {
 		case goHallway:
 			if (isDrawn == false) {
 				setupHallway();
+				currentMap = 1;		//Hallway
 			}
 			gameLogic();
 			break;
@@ -548,6 +563,7 @@ void gameFrame() {
 		case goCondo:
 			if (isDrawn == false) {
 				setupCondo(currentFloor, currentCondo);
+				currentMap = 2;		//Condo
 			}
 			condoLogic();			
 			break;
@@ -681,16 +697,19 @@ void setupCondo(int whichFloor, int whichCondo) {
 
 	int windowStartCoarseX = 0;
 
+	int budStartCoarseX = 1;
+	
+	budState = rest;
 	
 	budFrame = 0;
 	budSubFrame = 0;
 	budDir = false;											//True = going left
 
-	budX = 5 * 8;								//Position of Bud on LCD, LCD coord
-	budY = 32; //budStartFineY;
+	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
+	budY = 104; //budStartFineY;
 	
-	budWorldX = 8 * (windowStartCoarseX + 5);			//Bud's position in the world (not the same as screen or tilemap)
-	budWorldY = 32; //budStartFineY;
+	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
+	budWorldY = budY; //budStartFineY;
 	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
 
 	budSpawned = true;
@@ -717,7 +736,8 @@ void setupCondo(int whichFloor, int whichCondo) {
 	
 	xLevelCoarse = windowStartCoarseX;				//In the map, the left edge of the current positiom (coarse)	
 	xLevelStripRight = xLevelStripLeft + 26;		//Where to fetch right edge map strips (when moving right)
-	
+	xWindowBudToTile = xWindowCoarse + (budStartCoarseX + 1);		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
+		
 	if (xLevelStripRight > 119) {					//Right edge rollover
 		xLevelStripRight -= 120;
 	}	
@@ -732,8 +752,19 @@ void setupCondo(int whichFloor, int whichCondo) {
 		}
 	}
 
+	kittenCount = 0;		//Reset rescue
+	kittenTotal = 0;		//Reset total found
+
+	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		if (object[x].active == true && object[x].category == 0 && object[x].type == 4) {		//Count kittens
+			kittenTotal++;
+		}
+	}
+
 	isDrawn = true;	
 	displayPause = false;
+	
+	kittenMessageTimer = 90;
 	
 }
 
@@ -769,14 +800,59 @@ void drawCondoStrip(int condoStripX, int nameTableX) {
 	
 }	
 
-
 void condoLogic() {
 
-	drawSpriteDecimal(xStripLeft, 8, 0, 0);
-	drawSpriteDecimal(xLevelStripLeft, 8, 8, 0);
-	drawSpriteDecimal(xWindowCoarse, 8, 16, 0);
-	drawSpriteDecimal(xLevelStripRight, 8, 24, 0);	
+	if (kittenMessageTimer > 0) {
+			
+		//0123456789ABCDE
+		//   RESCUE XX
+		//	  KITTENS
+		// GOTO THE EXIT
+		
+		if (kittenMessageTimer & 0x04) {
+			int offset = 4;
+			
+			if ((kittenTotal - kittenCount) > 9) {
+				offset = 0;
+			}
+	
+			if (kittenCount == kittenTotal) {
+				drawSpriteText("GOTO THE EXIT", 8, 56, 3);
+			}
+			else {
+				drawSpriteText("RESCUE", 28 + offset, 52, 3);
+				drawSpriteDecimal(kittenTotal - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
+				drawSpriteText("KITTENS", 36, 60, 3);								
+			}
+		}	
+		kittenMessageTimer--;
+	}
 
+	if (kittenCount == kittenTotal) {
+		
+		drawSprite(7 - inArrowFrame, 88, 6, 16 + 12, 1, 2, 4, false, false);		//out arrow sprite <		
+		drawSprite(16, 84, 7, 16 + 11, 1, 3, 4, false, false);		//OUT text
+		
+		if (++inArrowFrame > 7) {
+			inArrowFrame = 0;
+		}		
+		
+	}
+
+
+
+	// drawSpriteDecimal(xStripLeft, 8, 0, 0);
+	// drawSpriteDecimal(xLevelStripLeft, 8, 8, 0);
+	// drawSpriteDecimal(xWindowCoarse, 8, 16, 0);
+	// drawSpriteDecimal(xLevelStripRight, 8, 24, 0);	
+	
+	// drawSpriteDecimal(budX, 80, 0, 0);
+	// drawSpriteDecimal(budY, 80, 8, 0);
+	// drawSpriteDecimal(xWindowBudToTile, 80, 16, 0);
+	// drawSpriteDecimal(budY >> 3, 80, 24, 0);
+	// drawSpriteDecimal(jump, 80, 32, 0);
+
+	budLogic2();
 
 	// if (budSpawned == true) {
 		// budLogic();
@@ -794,35 +870,68 @@ void condoLogic() {
 
 	// moveJump = false;
 
-	if (button(left_but)) {
-		condoMoveLeft(3);
-	}
+	//tileDirect(xWindowBudToTile, budY >> 3, testX++);
+
+	// if (button(left_but)) {
+		// condoMoveLeft(3);
+	// }
 	
-	if (button(right_but)) {
-		condoMoveRight(3);
-	}
+	// if (button(right_but)) {
+		// condoMoveRight(3);
+	// }
 
 	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+
+
 	
-	for (int g = 0 ; g < maxThings ; g++) {
+	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level
 		
 		if (object[g].active) {
-			object[g].scan(worldX, 0);			//See if object visible				
+			object[g].scan(worldX, 0);
+
+			if (object[g].visible) {
+				
+				if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {
+					
+					if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
+						playAudio("audio/getread.wav");	
+						object[g].state = 200;
+						object[g].animate = 0;
+						kittenMessageTimer = 60;		//Show remain
+						kittenCount++;					//Saved count
+					}
+					
+				}	
+
+				if (budState == swiping && object[g].state == 0) {
+					
+					if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+						playAudio("audio/glass_loose.wav");	
+						object[g].state = 99;
+						object[g].animate = 1;
+					}
+					
+				}	
+				
+				
+			}
+	
 		}
 		
 	}
-	
-		
-	
+
 	
 }
 
-	
-
 bool condoMoveLeft(int theSpeed) {
+
+	if (budX > 48) {
+		return false;
+	}
 	
 	xWindowFine -= theSpeed;				//Move fine scroll		
 	
+	budWorldX -= theSpeed;
 	worldX -= theSpeed;
 	
 	if (xWindowFine < 0) {				//Passed tile boundary?
@@ -830,12 +939,14 @@ bool condoMoveLeft(int theSpeed) {
 		if (xLevelCoarse == 0) {		//At left edge?
 			xWindowFine = 0;			//Clear out fine register, we can't go further left
 			worldX += theSpeed;
+			budWorldX += theSpeed;
 			return false;
 		}
 
 		xWindowFine += 8;				//Subtract fine		
 		
 		xWindowCoarse = windowCheckLeft(xWindowCoarse);
+		xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
 		xStripLeft = windowCheckLeft(xStripLeft);
 		xStripRight = windowCheckLeft(xStripRight);
 
@@ -856,9 +967,6 @@ bool condoMoveLeft(int theSpeed) {
 		xStripDrawing = xStripLeft;			//Where to draw new tiles on tilemap
 		
 		drawCondoStrip(xLevelStripLeft, xStripLeft);
-		
-		//drawHallwayTiles(xLevelStripLeft);	//Draw the strip
-		
 
 	}	
 	
@@ -868,7 +976,11 @@ bool condoMoveLeft(int theSpeed) {
 
 bool condoMoveRight(int theSpeed) {
 	
-
+	if (budX < 56) {
+		return false;
+	}
+	
+	budWorldX += theSpeed;
 	xWindowFine += theSpeed;				//Move fine scroll		
 	
 	worldX += theSpeed;	
@@ -878,12 +990,14 @@ bool condoMoveRight(int theSpeed) {
 		if (xLevelCoarse == 104) {		//At right edge?
 			xWindowFine = 7;			//Max out fine register, we can't go further right
 			worldX -= theSpeed;
+			budWorldX -= theSpeed;
 			return false;
 		}
 	
 		xWindowFine -= 8;				//Subtract fine		
 		
 		xWindowCoarse = windowCheckRight(xWindowCoarse);
+		xWindowBudToTile = windowCheckRight(xWindowBudToTile);
 		xStripLeft = windowCheckRight(xStripLeft);
 		xStripRight = windowCheckRight(xStripRight);
 
@@ -913,9 +1027,378 @@ bool condoMoveRight(int theSpeed) {
 
 
 
+void spawnIntoCondo(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
 
 
-void spawnIntoLevel(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
+	
+	
+}
+
+
+void budLogic2() {
+
+	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
+	
+	if (++budSubFrame > 1) {
+		budSubFrame = 0;
+		animateBud = true;				//Set animate flag. Bud still moves/does logic on ones
+	}		
+
+	int jumpGFXoffset = 6;						//Jumping up	
+	
+	bool budNoMove = true;
+
+	switch(budState) {
+	
+		case rest:								//Rest = not moving left or right. Can still be jumping or falling
+			if (jump > 0) {
+				int offset = 6;					//Jumping up gfx (default)
+				
+				if (jump == 128) {
+					offset = 8;					//Falling down gfx
+				}			
+				if (budDir == false) {														//Falling facing right	
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				}				
+			}
+			else {
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);			//2x2 tile hit box (his ears don't count)
+	
+				if (budDir == false) {			//Right
+					drawSprite(budX, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX + 8, budY, 7, 18, 4, budDir, false);		//Front feet
+					drawSprite(budX, budY - 8, 6, 17, 4, budDir, false);		//Back
+					
+					if (blink < 35) {
+						drawSprite(budX + 8, budY - 8, 7, 17, 4, budDir, false);
+					}
+					else {
+						drawSprite(budX + 8, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+					}
+
+					drawSprite(budX + 8, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+					
+				}
+				else {							//Left
+					drawSprite(budX + 8, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX, budY, 7, 18, 4, budDir, false);		//Front feet
+					drawSprite(budX + 8, budY - 8, 6, 17, 4, budDir, false);		//Back
+					
+					if (blink < 35) {
+						drawSprite(budX, budY - 8, 7, 17, 4, budDir, false);
+					}
+					else {
+						drawSprite(budX, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+					}
+
+					drawSprite(budX, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+				}	
+				if (animateBud) {
+					if (++tail > 2) {
+						tail = 0;
+					}
+					if (++blink > 40) {
+						blink = 0;
+					}
+				}				
+			}
+			break;
+		
+		case moving:
+			if (jump > 0) {						//If jumping while moving use the jump stills
+				int offset = 6;					//Jumping up gfx (default)
+				if (jump == 128) {
+					offset = 8;					//Falling down gfx
+				}	
+				if (budDir == false) {														//Falling facing right	
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					budMoveRightC(3);
+				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					budMoveLeftC(3);
+				}		
+			}
+			else {										//Running on ground animation
+	
+				if (budDir == false) {		
+					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					budMoveRightC(3);		
+				}
+				else {				
+					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					budMoveLeftC(3);		
+				}
+				if (animateBud) {
+					if (++budFrame > 6) {
+						budFrame = 0;
+					}					
+				}		
+			}
+			break;	
+
+		case swiping:
+			if (budDir == true) {			//Left
+				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudAttackBox(budWorldX - 16, budWorldY - 8, budWorldX, budWorldY);
+			}
+			else {							//Right
+				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudAttackBox(budWorldX + 16, budWorldY - 8, budWorldX + 32, budWorldY);
+			}	
+			break;
+
+		case entering:
+			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
+		
+			if (animateBud) {
+				if (budFrame & 0x02) {
+					budDir = false;
+				}					
+				else {
+					budDir = true;
+				}
+				if (++budFrame > 15) {
+					budFrame = 0;
+					switchGameTo(goCondo);
+				}
+			}		
+		
+			break;
+
+	}
+
+	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't? Must be rising still
+		if (++jump < 12) {				//Jump up with decreasing velocity	
+			budY -= velocikitten;
+			budWorldY -= velocikitten;
+			if (velocikitten > 1) {				
+				velocikitten--;
+			}
+		}
+		else {							//Hit top? Set falling and reset velocity
+			jump = 128;
+			velocikitten = 2;
+		}
+		
+	}
+	
+	if (jump == 0 || jump == 128) {		//Walked off a ledge or coming down from a jump?
+	
+		bool fallEdge = false;
+		
+		
+		if (budY > -1) {				//Only do checks with Bud on screen (else tile data is bad)
+			if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
+				fallEdge = true;
+			}			
+		}
+		else {
+			fallEdge = true;
+		}
+	
+		if (fallEdge == true) {			//Nothing below?
+		
+			if (jump == 0) {			//Weren't already falling?
+				velocikitten = 2;		//Means we walked off a ledge, reset velocity
+				jump = 128;				//Set falling state
+				//budState = jumping;
+			}
+
+			budY += velocikitten;					//Fall
+			budWorldY += velocikitten;
+			if (velocikitten < 8) {
+				velocikitten++;
+			}
+		}
+		else {
+			if (jump == 128) {				//Were we falling? Clear flag
+				jump = 0;					//Something below? Clear jump flag
+				budY &= 0xF8;
+				budWorldY &= 0xF8;
+				budState = rest;
+			}		
+		}
+	
+	}
+
+	if (button(C_but)) {
+		if (jump == 0) {
+			jump = 1;
+			velocikitten = 9;
+			budNoMove = false;
+			//budState = jumping;	
+		}
+		
+	}
+
+	if (budSwipe < 99 && animateBud == true) {
+		if (++budSwipe > 2) {
+			budSwipe = 99;
+			budState = rest;
+		}
+	}
+
+	if (button(B_but) && jump == 0) {		//Can't swipe while jumping
+	
+		if (budSwipe == 99) {
+			budSwipe = 0;	
+			budState = swiping;
+		}
+		
+		thingAdd(bigRobot, 100, 64);
+	
+	}
+
+	
+	if (button(left_but)) {
+		budDir = true;
+	
+		switch(budState) {
+		
+			case rest:
+				budState = moving;
+				budFrame = 0;
+				break;
+				
+			case moving:
+				budDir = true;
+				//bud moves xPos change
+				break;	
+				
+			case jumping:
+				moveJump = true;
+				budDir = true;
+				//bud moves xPos change
+				break;				
+
+			case stopping:
+				budState = moving;
+				break;
+	
+		}
+		budNoMove = false;
+		
+	}
+	
+	if (button(right_but)) {
+		budDir = false;
+		
+		switch(budState) {
+		
+			case rest:
+				budState = moving;
+				budFrame = 0;
+				break;
+				
+			case moving:
+				budDir = false;
+				//bud moves xPos change
+				break;
+
+			case jumping:
+				moveJump = true;
+				budDir = false;
+				//bud moves xPos change
+				break;					
+
+			case stopping:
+				budState = moving;
+				break;
+	
+		}
+		budNoMove = false;
+
+	}
+	
+
+	if (budNoMove == true && budState == moving) {		//Was Bud moving, but then d-pad released? Bud comes to a stop
+		budState = rest;
+		budFrame = 0;
+	}
+		
+	if (currentMap == 1) {					//In the hallway?
+		
+		int temp = checkDoors();			//See if Bud is standing in front of a door
+		
+		if (temp > -1 && budState != entering) {					//He is? tempCheck contains a index # of which one (0-5)
+			
+			if ((apartmentState[temp] & 0xC0) == 0x00) {	//If apartment cleared or door already open bits set, no action can be taken
+
+				if (button(up_but)) {
+					apartmentState[temp] |= 0x40;								//Set the door open bit
+					playAudio("audio/doorOpen.wav");
+					populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
+					redrawCurrentHallway();
+					budState = entering;
+					budFrame = 0;	
+					currentCondo = temp + 1;
+				}
+				
+				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+				
+				if (++inArrowFrame > 7) {
+					inArrowFrame = 0;
+				}
+		
+			}
+			
+		}
+
+		if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
+			
+			if (elevatorOpen == true) {							//Ready for the next level?
+
+				if (button(up_but)) {
+					playAudio("audio/elevDing.wav");
+					budState = entering;
+					budFrame = 0;				
+				}
+				
+				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+				
+				if (++inArrowFrame > 7) {
+					inArrowFrame = 0;
+				}
+		
+			}
+			
+		}
+	
+	}
+	
+	// if (button(B_but)) {
+		// thingAdd(bigRobot, 100, 64);
+		// //playAudio("audio/getread.wav");
+		// //playAudio("audio/back.wav");
+		// //drawText("supercalifraguliosdosis", 0, 14, true);
+		// //pwm_set_freq_duty(6, 261, 25);
+		// //pwm_set_freq_duty(8, 277, 50);
+	// }	
+	
+	if (button(A_but)) {
+		//random cat sounds
+	}		
+	
+	
+}
+
+
+
+void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
 
 	budFrame = 0;
 	budSubFrame = 0;
@@ -1366,11 +1849,8 @@ void budLogic() {
 	// }	
 	
 	if (button(A_but)) {
-		//switchMenuTo(mainMenu);
+		playAudio("audio/hitModem.wav");
 	}		
-	
-	
-
 	
 	
 }
@@ -1391,7 +1871,8 @@ void setupHallway() {
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-	spawnIntoLevel(6, 5, 40);
+	//spawnIntoHallway(52 - 6, 5, 40);
+	spawnIntoHallway(6, 5, 40);
 	
 	drawHallway(1);	
 
@@ -1408,12 +1889,24 @@ void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
 	budWy2 = y2;	
 }
 
+void setBudAttackBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
+	
+	budAx1 = x1;
+	budAy1 = y1;	
+	budAx2 = x2;
+	budAy2 = y2;
+	
+}
+
+
 bool budMoveLeftC(int speed) {
 
-	if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
-		return false;
+	if (budY > -1) {
+		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
+			return false;
+		}		
 	}
-		
+	
 	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
 		budX -= speed;
 		budWorldX -= speed;
@@ -1431,10 +1924,12 @@ bool budMoveLeftC(int speed) {
 
 bool budMoveRightC(int speed) {
 
-	if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
-		return false;
+	if (budY > -1) {
+		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
+			return false;
+		}		
 	}
-	
+
 	if (condoMoveRight(speed) == false) {		//Can window NOT scroll left?
 		budX += speed;
 		budWorldX += speed;
@@ -2133,11 +2628,6 @@ void drawChandelier(int tileX) {
 		
 	}
 
-		
-		
-	
-	
-	
 }
 
 int thingAdd(int whichThing, int16_t x, int16_t y) {
@@ -2362,7 +2852,7 @@ void setupEdit() {
 
 	loadPalette("condo/condo.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles
-	//BUD?
+	loadPattern("sprites/bud.nes", 256, 256);
 	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
 	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots
 	
@@ -2474,15 +2964,15 @@ void drawEditMenuPopUp() {
 			break;
 			
 			case 3:
-				if (--fileNameFloor < 49) {			//1-9
-					fileNameFloor = 57;					
+				if (--fileNameFloor < 49) {			//1-6
+					fileNameFloor = 54;					
 				}
 				updateMapFileName();
 			break;
 			
 			case 4:
-				if (--fileNameCondo < 49) {			//1-9
-					fileNameCondo = 57;
+				if (--fileNameCondo < 49) {			//1-6
+					fileNameCondo = 54;
 				}	
 				updateMapFileName();	
 			break;
@@ -2498,14 +2988,14 @@ void drawEditMenuPopUp() {
 			break;
 			
 			case 3:
-				if (++fileNameFloor > 57) {			//1-9
+				if (++fileNameFloor > 54) {			//1-6
 					fileNameFloor = 49;
 				}
 				updateMapFileName();
 			break;
 			
 			case 4:
-				if (++fileNameCondo > 57) {			//1-9
+				if (++fileNameCondo > 54) {			//1-6
 					fileNameCondo = 49;
 				}
 				updateMapFileName();		
@@ -2627,11 +3117,51 @@ void saveLevel() {
 	writeByte(128);								//end of tile data
 	writeByte(objectCount);						//Write the count after tile data
 
-	for (int x = 0 ; x < maxThings ; x++) {		//Scan again
-		if (object[x].active == true) {			//If active, save the data
-			saveObject(x);
+	//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
+
+	for (int x = 0 ; x < maxThings ; x++) {		//Kitten/greenie scan (top draw priority)
+		if (object[x].active == true) {
+		
+			if (object[x].category == 0) {		//Gameplay object?		
+				if (object[x].type > 3) {		//Kitten or greenie? Save first
+					saveObject(x);
+				}			
+			}
+
 		}
 	}
+	
+	for (int x = 0 ; x < maxThings ; x++) {		//Robot scan (next priority)
+		if (object[x].active == true) {
+		
+			if (object[x].category == 0) {		//Gameplay object?		
+				if (object[x].type < 4) {		//Evil robot? Save
+					saveObject(x);
+				}			
+			}
+
+		}
+	}	
+
+	for (int x = 0 ; x < maxThings ; x++) {		//Most other objects (will draw behind kittens, robots and greenies)
+		if (object[x].active == true) {
+		
+			if (object[x].category > 1) {		//Not a gameplay object or bad art?
+				saveObject(x);		
+			}
+		}
+	}	
+	
+	for (int x = 0 ; x < maxThings ; x++) {		//Bad art (lowest priority, on walls)
+		if (object[x].active == true) {
+		
+			if (object[x].category == 1) {		//Bad art?		
+				saveObject(x);		
+			}
+		}
+	}		
+	
+
 	writeByte(255);								//end of object data
 	closeFile();								//Close the file when done (doesn't seem to be working???)
 	
@@ -2655,6 +3185,9 @@ void loadLevel() {
 	Serial.println("LOADING FILE");
 	//File exists, so load it!
 	
+	clearObjects();		
+	highestObjectIndex = 0;	
+	
 	uint16_t temp;
 	
 	for (int y = 0 ; y < 15 ; y++) {				//Read the map file in horizontal strips from left to right, top to bottom
@@ -2671,10 +3204,14 @@ void loadLevel() {
 
 		uint8_t objectCount = readByte();			//Get # of objects saved in this file
 
+		highestObjectIndex = objectCount;			//Set this as our scan limit
+
 		Serial.print(objectCount, DEC);
 		Serial.println(" OBJECTS LOADED");
 	
-		for (int x = 0 ; x < objectCount ; x++) {	//Load that many objects. They'll populate from 0 up
+		//ADD KITTEN BUBBLE SORT?
+	
+		for (int x = 0 ; x < objectCount ; x++) {	//Load that many objects into object RAM. They'll populate from 0 up
 			object[x].active = false;			    //Kill any existing object (overwrite)
 			loadObject(x);							//Load new data
 		}
@@ -3176,10 +3713,17 @@ void placeObjectInMap() {
 	
 	if (objectDropCategory == 0) {
 		object[objectIndexNext].type = selectRobot;
+		if (selectRobot == 5) {			//Greenie?
+			object[objectIndexNext].animate = 4;
+			object[objectIndexNext].dir = true;
+		}
 	}
 	else {
 		object[objectIndexNext].type = objectDropType;
+		object[objectIndexNext].animate = 0;		
 	}
+	
+	object[objectIndexNext].subAnimate = 0;
 	
 	objectIndexLast = objectIndexNext;			//Store the index so when we complete the sentry entry we know where to store it
 
@@ -3454,8 +3998,15 @@ void drawObjectSelectWindow() {
 		case 0:
 			drawText("GAME PLAY", 5, 2, false);
 			objectSheetIndex[objectDropCategory][0] = robotSheetIndex[selectRobot][0];			//Get sheet XY and offset by page 3
-			objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 48;	
 			
+			if (selectRobot == 5) {
+				objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 16;	
+				objectPlacePalette = 5;		//Always green
+			}
+			else {
+				objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 48;	
+			}
+						
 			objectTypeSize[objectDropCategory][0] = robotTypeSize[selectRobot][0];
 			objectTypeSize[objectDropCategory][1] = robotTypeSize[selectRobot][1];
 			
