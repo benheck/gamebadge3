@@ -23,7 +23,7 @@ int dir = 0;
 
 int dutyOut;
 
-enum movement { rest, starting, walking, running, jumping, moving, turning, swiping, stopping, entering, exiting };
+enum movement { rest, starting, walking, running, jumping, moving, turning, swiping, stopping, entering, exiting, damaged, dead };
 
 movement budState = rest;
 
@@ -128,7 +128,7 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { titleScreen, titleScreen2, levelEdit, saveMap, loadMap, game, goHallway, goCondo, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { titleScreen, titleScreen2, levelEdit, saveMap, loadMap, game, goHallway, goCondo, goJail, pauseMode};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = titleScreen;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -224,6 +224,19 @@ int highestObjectIndex = 0;				//Counts up as a level loads. When running logic/
 int kittenTotal = 0;					//# of kittens per level
 int kittenCount = 0;					//How many player has recused
 int kittenMessageTimer = 0;
+
+int budDeath = 0;						//If set, move Bud to center of screen then switch to KITTEN JAIL!!!
+
+int jailYpos;
+int budLives;
+int budPower;
+int budBlink;
+int budPalette;				//Uber hack to make Bud blink when invincible, if blink & 1 budPalette = 8 which is blank palette RAM
+int budStunned;
+bool budStunnedDir;
+
+bool fallingObjectState[16];			//Keep track of up to 16 falling objects (can't possible be more... right?)
+int fallingObjectIndex[16];
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -546,6 +559,7 @@ void gameFrame() {
 					
 		case game:
 			currentFloor = 1;			//Setup game here
+			budLives = 9;
 			switchGameTo(goHallway);
 			//switchGameTo(goCondo);
 			//gameLogic();
@@ -567,7 +581,14 @@ void gameFrame() {
 			}
 			condoLogic();			
 			break;
-					
+	
+		case goJail:
+			if (isDrawn == false) {
+				setupJail();
+			}
+			jailLogic();
+			break;
+	
 			
 		case pauseMode:
 			if (isDrawn == false) {				//Draw menu...
@@ -665,6 +686,53 @@ void drawPauseMenu() {
 	isDrawn = true;
 	displayPause = false;   		//Allow core 2 to draw
 	
+}
+
+
+void setupJail() {
+
+	fillTiles(0, 0, 14, 14, ' ', 0);			//Black BG
+			
+	setWindow(0, 0);
+	menuTimer = 90;				//Jail for 4 seconds
+
+	jailYpos = -48;
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;		
+	
+}
+
+void jailLogic() {
+
+	drawSprite(40, jailYpos, 8, 16 + 10, 5, 5, 7, false, false);
+
+	drawSprite(40, 80, 0x01F8, 0, false, false);
+	drawSprite(56, 80, 0x01F9, 0, false, false);
+	drawSpriteDecimal(budLives, 72, 80, 0);
+	
+	if (menuTimer > 60) {
+		drawSprite(52, 47, 13, 16 + 13, 2, 3, 4, false, false);
+	}
+	else {
+		drawSprite(52, 47, 13, 16 + 10, 2, 3, 4, false, false);
+	}
+
+	if (jailYpos == 24) {
+		playAudio("audio/jaildoor.wav");
+		budLives--;
+	}
+
+	if (jailYpos < 32) {
+		jailYpos += 8;
+	}
+	else {
+		if (--menuTimer == 0) {
+			budPower = 3;
+			switchGameTo(goCondo);		
+		}				
+	}
+
 }
 
 
@@ -766,6 +834,9 @@ void setupCondo(int whichFloor, int whichCondo) {
 	
 	kittenMessageTimer = 90;
 	
+	budPower = 3;
+	budStunned = 0;
+	
 }
 
 void reloadCondo() {
@@ -822,6 +893,10 @@ void condoLogic() {
 			else {
 				drawSpriteText("RESCUE", 28 + offset, 52, 3);
 				drawSpriteDecimal(kittenTotal - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
+				
+				if (kittenCount == (kittenTotal - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
+					drawSpriteText("      /", 36, 60, 3);	
+				}				
 				drawSpriteText("KITTENS", 36, 60, 3);								
 			}
 		}	
@@ -841,7 +916,7 @@ void condoLogic() {
 
 
 
-	// drawSpriteDecimal(xStripLeft, 8, 0, 0);
+	//drawSpriteDecimal(budStunned, 60, 0, 0);
 	// drawSpriteDecimal(xLevelStripLeft, 8, 8, 0);
 	// drawSpriteDecimal(xWindowCoarse, 8, 16, 0);
 	// drawSpriteDecimal(xLevelStripRight, 8, 24, 0);	
@@ -851,6 +926,20 @@ void condoLogic() {
 	// drawSpriteDecimal(xWindowBudToTile, 80, 16, 0);
 	// drawSpriteDecimal(budY >> 3, 80, 24, 0);
 	// drawSpriteDecimal(jump, 80, 32, 0);
+
+	//Draw lives and power bar
+	drawSprite(4, 4, 0x01F8, 4, false, false);	//face
+	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
+	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
+
+	for (int x = 0 ; x < 3 ; x++) {
+		if (budPower > x) {
+			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
+		}
+		else {
+			drawSprite((x << 3) + 4, 14, 0x01FA, 4, false, false);
+		}			
+	}
 
 	budLogic2();
 
@@ -881,33 +970,65 @@ void condoLogic() {
 	// }
 
 	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
-
-
 	
 	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level
 		
 		if (object[g].active) {
-			object[g].scan(worldX, 0);
+			object[g].scan(worldX, 0);					//Draw object if active, plus logic (in object)
+
+			if (object[g].state == 100) {				//Object hit floor?
+				//Serial.println("Object hit floor");
+				//object[g].active =  false;
+				fallListRemove(g);						//Remove it from active lists (also kills object)
+			}
 
 			if (object[g].visible) {
-				
-				if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {
+
+				if (object[g].category == 0 && object[g].type < 4) {				//Robot?
+					
+					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true && budBlink == 0 && budStunned == 0) {	//Did it hit Bud?
+						budDamage();
+					}
+					
+					
+					
+					
+					fallCheckRobot(g);			//See if any falling objects hit this robot
+					
+				}	
+			
+				if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {		//Rescue kitten?
 					
 					if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
 						playAudio("audio/getread.wav");	
-						object[g].state = 200;
+						object[g].state = 200;			//Rescue balloon
 						object[g].animate = 0;
 						kittenMessageTimer = 60;		//Show remain
 						kittenCount++;					//Saved count
 					}
 					
 				}	
-
+				
+				if (object[g].category == 0 && object[g].type == 5) {						//Greenie?
+					
+					if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
+						object[g].active = 0;
+						playAudio("audio/greenie.wav");
+						if (++budPower > 3) {
+							budPower = 3;
+						}
+					}
+					
+				}				
+				
 				if (budState == swiping && object[g].state == 0) {
 					
 					if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+						
+						fallListAdd(g);							//Add this item to the fall list
+						
 						playAudio("audio/glass_loose.wav");	
-						object[g].state = 99;
+						object[g].state = 99;					//Falling
 						object[g].animate = 1;
 					}
 					
@@ -922,6 +1043,94 @@ void condoLogic() {
 
 	
 }
+
+void budDamage() {
+
+	budPower--;			//Dec power
+	
+	if (budPower == 0) {
+		playAudio("audio/buddead.wav");
+		switchGameTo(goJail);
+		budState = dead;
+		return;		
+	}
+	else {
+		budStunned = 15;				//15 frame stun knockback then 1 sec invinc
+		budStunnedDir = !budDir;
+		playAudio("audio/budhit.wav");
+		budState = damaged;
+		budFrame = 0;
+	}
+	
+}
+
+void fallListAdd(int index) {		//Pass in object to fall
+
+	for (int x = 0 ; x < 16 ; x++) {
+		
+		if (fallingObjectState[x] != true) {		//Find firt empty slot
+		
+			fallingObjectState[x] = true;			//Set it active
+			fallingObjectIndex[x] = index;			//and set which object it's connected to
+			// Serial.print("Fall list add #");
+			// Serial.print(x);
+			// Serial.print(" = index #");
+			// Serial.println(index);
+			
+			break;							//Done
+		}
+
+	}
+
+	
+}
+
+void fallListRemove(int index) {		//Pass in falling object to remove
+	
+	for (int x = 0 ; x < 16 ; x++) {
+
+		if (fallingObjectState[x] == true) {			//Slot was set?
+			
+			if (fallingObjectIndex[x] == index) {		//is this the one we're looking for?
+			
+				object[index].active = false;			//End object referenced
+				fallingObjectState[x] = false;			//Remove it from fall list
+				
+				// Serial.print("Fall list remove #");
+				// Serial.print(x);
+				// Serial.print(" = index #");
+				// Serial.println(index);
+				
+				break;
+			}	
+			
+		}
+
+	}
+	
+}
+
+void fallCheckRobot(int index) {		//Pass in robot object index we are checking for falls against
+
+	for (int x = 0 ; x < 16 ; x++) {		
+		if (fallingObjectState[x] == true) {		//Object is falling?
+		
+			// Serial.print("Fall list check ");
+			// Serial.print(x);
+			// Serial.print(" - ");
+			// Serial.println(fallingObjectIndex[x]);
+					
+			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
+		
+			if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
+				object[index].active = false;		//Blow up robot
+			}
+			
+		}
+	}	
+	
+}
+
 
 bool condoMoveLeft(int theSpeed) {
 
@@ -1037,6 +1246,22 @@ void spawnIntoCondo(int windowStartCoarseX, int budStartCoarseX, int budStartFin
 
 void budLogic2() {
 
+	budPalette = 4;						//Default bud palette
+	
+	if (budBlink > 0) {
+		if (budBlink > 15) {
+			if (budBlink & 0x01) {				//If blink active, use alt Bud palette on ones (invinc flash)
+				budPalette = 8;
+			}				
+		}
+		else {
+			if (budBlink & 0x02) {				//Blink slower when time almost up
+				budPalette = 8;
+			}				
+		}
+		budBlink--;						//Dec the invinc time		
+	}
+	
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
 	
 	if (++budSubFrame > 1) {
@@ -1058,11 +1283,11 @@ void budLogic2() {
 					offset = 8;					//Falling down gfx
 				}			
 				if (budDir == false) {														//Falling facing right	
-					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);
 					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
 				}
 				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);	//Falling facing left
 					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 				}				
 			}
@@ -1070,33 +1295,33 @@ void budLogic2() {
 				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);			//2x2 tile hit box (his ears don't count)
 	
 				if (budDir == false) {			//Right
-					drawSprite(budX, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-					drawSprite(budX + 8, budY, 7, 18, 4, budDir, false);		//Front feet
-					drawSprite(budX, budY - 8, 6, 17, 4, budDir, false);		//Back
+					drawSprite(budX, budY, 0 + tail, 31, budPalette, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX + 8, budY, 7, 18, budPalette, budDir, false);		//Front feet
+					drawSprite(budX, budY - 8, 6, 17, budPalette, budDir, false);		//Back
 					
 					if (blink < 35) {
-						drawSprite(budX + 8, budY - 8, 7, 17, 4, budDir, false);
+						drawSprite(budX + 8, budY - 8, 7, 17, budPalette, budDir, false);
 					}
 					else {
-						drawSprite(budX + 8, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+						drawSprite(budX + 8, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
 					}
 
-					drawSprite(budX + 8, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+					drawSprite(budX + 8, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips					
 					
 				}
 				else {							//Left
-					drawSprite(budX + 8, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-					drawSprite(budX, budY, 7, 18, 4, budDir, false);		//Front feet
-					drawSprite(budX + 8, budY - 8, 6, 17, 4, budDir, false);		//Back
+					drawSprite(budX + 8, budY, 0 + tail, 31, budPalette, budDir, false);		//Draw animated tail on fours		
+					drawSprite(budX, budY, 7, 18, budPalette, budDir, false);		//Front feet
+					drawSprite(budX + 8, budY - 8, 6, 17, budPalette, budDir, false);		//Back
 					
 					if (blink < 35) {
-						drawSprite(budX, budY - 8, 7, 17, 4, budDir, false);
+						drawSprite(budX, budY - 8, 7, 17, budPalette, budDir, false);
 					}
 					else {
-						drawSprite(budX, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
+						drawSprite(budX, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
 					}
 
-					drawSprite(budX, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
+					drawSprite(budX, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips					
 				}	
 				if (animateBud) {
 					if (++tail > 2) {
@@ -1116,12 +1341,12 @@ void budLogic2() {
 					offset = 8;					//Falling down gfx
 				}	
 				if (budDir == false) {														//Falling facing right	
-					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
+					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);
 					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
 					budMoveRightC(3);
 				}
 				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
+					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);	//Falling facing left
 					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 					budMoveLeftC(3);
 				}		
@@ -1129,12 +1354,12 @@ void budLogic2() {
 			else {										//Running on ground animation
 	
 				if (budDir == false) {		
-					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, budPalette, budDir, false);	//Running
 					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
 					budMoveRightC(3);		
 				}
 				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
+					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, budPalette, budDir, false);	//Running
 					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 					budMoveLeftC(3);		
 				}
@@ -1148,19 +1373,41 @@ void budLogic2() {
 
 		case swiping:
 			if (budDir == true) {			//Left
-				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
 				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 				setBudAttackBox(budWorldX - 16, budWorldY - 8, budWorldX, budWorldY);
 			}
 			else {							//Right
-				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
+				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
 				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
 				setBudAttackBox(budWorldX + 16, budWorldY - 8, budWorldX + 32, budWorldY);
 			}	
 			break;
 
+		case damaged:
+			if (budStunnedDir == true) {	//Stunned rolling left
+				drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, false, false);	//Rolls left, but is facing right, rolling backwards
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				budMoveLeftC(4);
+			}
+			else {							//Stunned rolling right
+				drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, true, false);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				budMoveRightC(4);				
+			}
+			if (animateBud) {
+				if (++budFrame > 3) {
+					budFrame = 0;
+				}					
+			}
+			if (--budStunned == 0) {
+				budState = rest;
+				budBlink = 30;			//After the stun 1 sec invincible
+			}			
+			break;
+
 		case entering:
-			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
+			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, budPalette, budDir, false);
 		
 			if (animateBud) {
 				if (budFrame & 0x02) {
@@ -1227,7 +1474,10 @@ void budLogic2() {
 				jump = 0;					//Something below? Clear jump flag
 				budY &= 0xF8;
 				budWorldY &= 0xF8;
-				budState = rest;
+				
+				if (budStunned == 0) {		//If falling while stunned, don't reset state (stun timeout will)
+					budState = rest;
+				}	
 			}		
 		}
 	

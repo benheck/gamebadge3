@@ -74,13 +74,13 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 	int offsetX = 0;
 	int offsetY = 0;
 
-	if (state == 99) {
+	if (state == 99) {						//Object falling?
 		yPos += animate;
 		if (animate < 8) {
 			animate++;
 		}
 		if (yPos > (119 - (height << 3))) {		//Object hit the floor?
-			active = false;
+			state = 100;
 		}
 	}
 
@@ -172,11 +172,6 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 
 	
 	}
-
-
-
-
-
 
 	if (visible == true) {
 		drawSprite(xPos - worldX, yPos, sheetX + offsetX, sheetY + offsetY, width, height, palette, dir, false);		
