@@ -195,6 +195,7 @@ char fileNameCondo = '1';
 
 //0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
 int robotSheetIndex[6][2] = { {0, 0}, {0, 8}, {0, 12}, {8, 0}, {8, 5}, {6, 3}  };
+
 int robotTypeSize[6][2] = { {2, 6}, {3, 3}, { 4, 2 }, { 4, 3 }, { 2, 2 }, {1, 1} };		//Size index
 int selectRobot = 0;
 
@@ -235,8 +236,12 @@ int budPalette;				//Uber hack to make Bud blink when invincible, if blink & 1 b
 int budStunned;
 bool budStunnedDir;
 
+int jailTimer = 0;			
+
 bool fallingObjectState[16];			//Keep track of up to 16 falling objects (can't possible be more... right?)
 int fallingObjectIndex[16];
+
+int kittenMeow = 0;
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -694,9 +699,9 @@ void setupJail() {
 	fillTiles(0, 0, 14, 14, ' ', 0);			//Black BG
 			
 	setWindow(0, 0);
-	menuTimer = 90;				//Jail for 4 seconds
+	menuTimer = 60;				//Jail for 4 seconds
 
-	jailYpos = -48;
+	jailYpos = -80;
 
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;		
@@ -711,11 +716,11 @@ void jailLogic() {
 	drawSprite(56, 80, 0x01F9, 0, false, false);
 	drawSpriteDecimal(budLives, 72, 80, 0);
 	
-	if (menuTimer > 60) {
-		drawSprite(52, 47, 13, 16 + 13, 2, 3, 4, false, false);
+	if (menuTimer > 50) {
+		drawSprite(52, 47, 13, 16 + 13, 2, 3, 4, false, false);		//Sitting
 	}
 	else {
-		drawSprite(52, 47, 13, 16 + 10, 2, 3, 4, false, false);
+		drawSprite(52, 47, 13, 16 + 10, 2, 3, 4, false, false);		//Paws on bars
 	}
 
 	if (jailYpos == 24) {
@@ -815,8 +820,8 @@ void setupCondo(int whichFloor, int whichCondo) {
 
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
-		if (object[x].active == true && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
-			object[x].extraX = true;
+		if (object[x].active == true) { // && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
+			object[x].moving = true;
 		}
 	}
 
@@ -873,47 +878,74 @@ void drawCondoStrip(int condoStripX, int nameTableX) {
 
 void condoLogic() {
 
-	if (kittenMessageTimer > 0) {
-			
-		//0123456789ABCDE
-		//   RESCUE XX
-		//	  KITTENS
-		// GOTO THE EXIT
-		
-		if (kittenMessageTimer & 0x04) {
-			int offset = 4;
-			
-			if ((kittenTotal - kittenCount) > 9) {
-				offset = 0;
-			}
-	
-			if (kittenCount == kittenTotal) {
-				drawSpriteText("GOTO THE EXIT", 8, 56, 3);
-			}
-			else {
-				drawSpriteText("RESCUE", 28 + offset, 52, 3);
-				drawSpriteDecimal(kittenTotal - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
+	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
+		if (kittenMessageTimer > 0) {
 				
-				if (kittenCount == (kittenTotal - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
-					drawSpriteText("      /", 36, 60, 3);	
-				}				
-				drawSpriteText("KITTENS", 36, 60, 3);								
-			}
-		}	
-		kittenMessageTimer--;
+			//0123456789ABCDE
+			//   RESCUE XX
+			//	  KITTENS
+			// GOTO THE EXIT
+			
+			if (kittenMessageTimer & 0x04) {
+				int offset = 4;
+				
+				if ((kittenTotal - kittenCount) > 9) {
+					offset = 0;
+				}
+		
+				if (kittenCount == kittenTotal) {
+					drawSpriteText("GOTO THE EXIT", 8, 56, 3);
+				}
+				else {
+					drawSpriteText("RESCUE", 28 + offset, 52, 3);
+					drawSpriteDecimal(kittenTotal - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
+					
+					if (kittenCount == (kittenTotal - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
+						drawSpriteText("      /", 36, 60, 3);	
+					}				
+					drawSpriteText("KITTENS", 36, 60, 3);								
+				}
+			}	
+			kittenMessageTimer--;
+		}
+
+		if (kittenCount == kittenTotal) {
+			
+			drawSprite(7 - inArrowFrame, 88, 6, 16 + 12, 1, 2, 4, false, false);		//out arrow sprite <		
+			drawSprite(16, 84, 7, 16 + 11, 1, 3, 4, false, false);		//OUT text
+			
+			if (++inArrowFrame > 7) {
+				inArrowFrame = 0;
+			}		
+			
+		}
 	}
 
-	if (kittenCount == kittenTotal) {
-		
-		drawSprite(7 - inArrowFrame, 88, 6, 16 + 12, 1, 2, 4, false, false);		//out arrow sprite <		
-		drawSprite(16, 84, 7, 16 + 11, 1, 3, 4, false, false);		//OUT text
-		
-		if (++inArrowFrame > 7) {
-			inArrowFrame = 0;
-		}		
-		
-	}
+	budLogic2();
 
+	if (budState == dead) {
+		if (menuTimer < 21) {
+			return;
+		}				
+		if (menuTimer == 21) {
+			fillTiles(0, 0, 31, 31, ' ', 0);			//Black BG				
+			setWindow(0, 0);
+			return;
+		}
+	}
+	
+	drawSprite(4, 4, 0x01F8, 4, false, false);	//face
+	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
+	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
+
+	for (int x = 0 ; x < 3 ; x++) {
+		if (budPower > x) {
+			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
+		}
+		else {
+			drawSprite((x << 3) + 4, 14, 0x01FA, 4, false, false);
+		}			
+	}	
 
 
 	//drawSpriteDecimal(budStunned, 60, 0, 0);
@@ -928,113 +960,123 @@ void condoLogic() {
 	// drawSpriteDecimal(jump, 80, 32, 0);
 
 	//Draw lives and power bar
-	drawSprite(4, 4, 0x01F8, 4, false, false);	//face
-	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
-	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
 
-	for (int x = 0 ; x < 3 ; x++) {
-		if (budPower > x) {
-			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
-		}
-		else {
-			drawSprite((x << 3) + 4, 14, 0x01FA, 4, false, false);
-		}			
-	}
-
-	budLogic2();
-
-	// if (budSpawned == true) {
-		// budLogic();
-	// }
-	// else {
-		// if (++budSpawnTimer == 20) {
-			// budSpawned = true;
-			// jump = 6;
-			// velocikitten = 5;
-			// thingAdd(hallGlass, 80, 48);			//Spawn broken glass
-			// thing[entryWindow].state = 1;			//Break the window
-			// playAudio("audio/glass_2.wav");
-		// }
-	// }
-
-	// moveJump = false;
-
-	//tileDirect(xWindowBudToTile, budY >> 3, testX++);
-
-	// if (button(left_but)) {
-		// condoMoveLeft(3);
-	// }
-	
-	// if (button(right_but)) {
-		// condoMoveRight(3);
-	// }
 
 	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
-	
+
 	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level
 		
 		if (object[g].active) {
 			object[g].scan(worldX, 0);					//Draw object if active, plus logic (in object)
 
 			if (object[g].state == 100) {				//Object hit floor?
-				//Serial.println("Object hit floor");
-				//object[g].active =  false;
+				playAudio("audio/glass_loose.wav");
 				fallListRemove(g);						//Remove it from active lists (also kills object)
+				object[g].state = 101;					//Null state (rubble on floor, still active object)
 			}
 
 			if (object[g].visible) {
 
-				if (object[g].category == 0 && object[g].type < 4) {				//Robot?
-					
-					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true && budBlink == 0 && budStunned == 0) {	//Did it hit Bud?
-						budDamage();
-					}
-					
-					
-					
-					
-					fallCheckRobot(g);			//See if any falling objects hit this robot
-					
-				}	
-			
-				if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {		//Rescue kitten?
-					
-					if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
-						playAudio("audio/getread.wav");	
-						object[g].state = 200;			//Rescue balloon
-						object[g].animate = 0;
-						kittenMessageTimer = 60;		//Show remain
-						kittenCount++;					//Saved count
-					}
-					
-				}	
-				
-				if (object[g].category == 0 && object[g].type == 5) {						//Greenie?
-					
-					if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
-						object[g].active = 0;
-						playAudio("audio/greenie.wav");
-						if (++budPower > 3) {
-							budPower = 3;
+				if (object[g].category == 0) {
+					if (object[g].type < 4) {				//Robot?
+						
+						if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true && budBlink == 0 && budStunned == 0) {	//Did it hit Bud?
+							budDamage();
 						}
+		
+						fallCheckRobot(g);			//See if any falling objects hit this robot
+						
+					}	
+				
+					if (object[g].type == 4 && object[g].state == 0) {		//Un-rescued kitten?
+						
+						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
+							playAudio("audio/thankYou.wav");	
+							object[g].xPos += 4;			//Center rescuse kitten on sitting kitten
+							object[g].yPos -= 4;
+							object[g].state = 200;			//Rescue balloon
+							object[g].animate = 0;
+							kittenMessageTimer = 60;		//Show remain
+							kittenCount++;					//Saved count
+						}
+						
+					}	
+					
+					if (object[g].type == 5 && budPower < 3) {						//Greenie? Only run logic if Bud needs power (no pickup on full power)
+						
+						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
+							object[g].active = 0;
+							playAudio("audio/greenie.wav");
+							if (++budPower > 3) {
+								budPower = 3;
+							}
+						}
+						
+					}					
+				}
+
+				if (budState == swiping) {	//Bud can only swipe inert objects
+					
+					if (object[g].category > 0 && object[g].state == 0) {	//Bud can only swipe inert objects
+						
+						if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+							
+							fallListAdd(g);							//Add this item to the fall list
+							
+							playAudio("audio/slap.wav");	
+							object[g].state = 99;					//Falling
+							object[g].animate = 1;
+						}
+						
 					}
 					
-				}				
-				
-				if (budState == swiping && object[g].state == 0) {
+					if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {	//If bud hits a kitten...
+						
+						if (object[g].xSentryLeft == 0 && object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+							
+							object[g].xSentryLeft = 40;			//Cooldown for swat sounds
+							
+							kittenMeow = random(0, 4);
+							
+							switch(kittenMeow) {
+								case 0:
+									playAudio("audio/kitmeow0.wav");
+								break;
+								
+								case 1:
+									playAudio("audio/kitmeow1.wav");
+								break;
+								
+								case 2:
+									playAudio("audio/kitmeow2.wav");
+								break;
+								
+								case 3:
+									playAudio("audio/kitmeow3.wav");
+								break;
+							
+							}
+
+						}
+						
+					}					
 					
-					if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
-						
-						fallListAdd(g);							//Add this item to the fall list
-						
+					
+					
+					
+				}	
+				
+				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art by jumping through it
+					
+					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {						
+						fallListAdd(g);							//Add this item to the fall list						
 						playAudio("audio/glass_loose.wav");	
 						object[g].state = 99;					//Falling
 						object[g].animate = 1;
 					}
 					
-				}	
-				
-				
+				}
+
 			}
 	
 		}
@@ -1048,14 +1090,16 @@ void budDamage() {
 
 	budPower--;			//Dec power
 	
-	if (budPower == 0) {
+	if (budPower == 0) {	
+		budStunned = 10;				//Prevent object re-triggers during death
+		menuTimer = 30;					//One second
 		playAudio("audio/buddead.wav");
-		switchGameTo(goJail);
 		budState = dead;
+		movingObjects(false);			//Freeze objects
 		return;		
 	}
 	else {
-		budStunned = 15;				//15 frame stun knockback then 1 sec invinc
+		budStunned = 10;				//15 frame stun knockback then 1 sec invinc
 		budStunnedDir = !budDir;
 		playAudio("audio/budhit.wav");
 		budState = damaged;
@@ -1093,7 +1137,7 @@ void fallListRemove(int index) {		//Pass in falling object to remove
 			
 			if (fallingObjectIndex[x] == index) {		//is this the one we're looking for?
 			
-				object[index].active = false;			//End object referenced
+				//object[index].active = false;			//End object referenced (actually let's do this elsewhere/keep it as rubble)
 				fallingObjectState[x] = false;			//Remove it from fall list
 				
 				// Serial.print("Fall list remove #");
@@ -1122,10 +1166,26 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 					
 			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
 		
-			if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
-				object[index].active = false;		//Blow up robot
+			if (object[g].animate == 8) {			//Object must be falling max speed to kill a robot
+				if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
+					
+					fallingObjectState[x] = false;		//Remove it from fall list
+					object[g].active = false;			//Destory falling object				
+					object[index].active = false;		//Blow up robot
+				}			
 			}
-			
+	
+		}
+	}	
+	
+}
+
+
+void movingObjects(bool state) {
+	
+	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		if (object[x].active == true) {		//If object exists and is a robot, turn movement on/off
+			object[x].moving = state;
 		}
 	}	
 	
@@ -1246,6 +1306,76 @@ void spawnIntoCondo(int windowStartCoarseX, int budStartCoarseX, int budStartFin
 
 void budLogic2() {
 
+	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
+	
+	if (++budSubFrame > 1) {
+		budSubFrame = 0;
+		animateBud = true;				//Set animate flag. Bud still moves/does logic on ones
+	}	
+
+	if (budState == dead) {
+		if (--menuTimer == 0) {
+			switchGameTo(goJail);
+		}	
+	
+		if (budStunnedDir == true) {	//Stunned rolling left
+			drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, false, false);	//Rolls left, but is facing right, rolling backwards
+		}
+		else {							//Stunned rolling right
+			drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, true, false);			
+		}	
+		
+		if (menuTimer > 20) {
+			return;
+		}		
+		
+		
+		if (animateBud) {
+			if (++budFrame > 3) {
+				budFrame = 0;
+			}					
+		}		
+		
+		bool centered = true;
+		
+		if (budX < 52) {
+			budX += 2;
+		}
+		if (budX > 52) {
+			budX -= 2;
+		}
+		if (budY < 60) {
+			budY += 2;
+		}
+		if (budY > 60) {
+			budY -= 2;
+		}
+
+		// bool centered = true;
+		
+		// if (budX < 52) {
+			// budX++;
+			// centered = false;
+		// }
+		// if (budX > 52) {
+			// budX--;
+			// centered = false;
+		// }
+		// if (budY < 55) {
+			// budY++;
+			// centered = false;
+		// }
+		// if (budY > 55) {
+			// budY--;
+			// centered = false;
+		// }
+		
+		// if (centered == true) {
+			// switchGameTo(goJail);
+		// }		
+		return;
+	}
+
 	budPalette = 4;						//Default bud palette
 	
 	if (budBlink > 0) {
@@ -1262,12 +1392,7 @@ void budLogic2() {
 		budBlink--;						//Dec the invinc time		
 	}
 	
-	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
 	
-	if (++budSubFrame > 1) {
-		budSubFrame = 0;
-		animateBud = true;				//Set animate flag. Bud still moves/does logic on ones
-	}		
 
 	int jumpGFXoffset = 6;						//Jumping up	
 	
@@ -3369,11 +3494,11 @@ void saveLevel() {
 
 	//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
 
-	for (int x = 0 ; x < maxThings ; x++) {		//Kitten/greenie scan (top draw priority)
+	for (int x = 0 ; x < maxThings ; x++) {		//Greenie scan (top draw priority)
 		if (object[x].active == true) {
 		
 			if (object[x].category == 0) {		//Gameplay object?		
-				if (object[x].type > 3) {		//Kitten or greenie? Save first
+				if (object[x].type == 5) {		//Greenie? Save first
 					saveObject(x);
 				}			
 			}
@@ -3392,6 +3517,18 @@ void saveLevel() {
 
 		}
 	}	
+
+	for (int x = 0 ; x < maxThings ; x++) {		//Kitten (below robots)
+		if (object[x].active == true) {
+		
+			if (object[x].category == 0) {		//Gameplay object?		
+				if (object[x].type == 4) {		//Kitten or greenie? Save first
+					saveObject(x);
+				}			
+			}
+
+		}
+	}
 
 	for (int x = 0 ; x < maxThings ; x++) {		//Most other objects (will draw behind kittens, robots and greenies)
 		if (object[x].active == true) {
@@ -3983,7 +4120,7 @@ void testAnimateObjects(bool onOff) {
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == true && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
-			object[x].extraX = onOff;
+			object[x].moving = onOff;
 		}
 	}	
 	
@@ -4206,11 +4343,13 @@ void windowObjectSelect() {
 		if (--objectDropCategory < 0) {
 			objectDropCategory = 6;			//Roll over
 		}
+		objectDropType = 0;
 	}
 	if (button(down_but)) {
 		if (++objectDropCategory > 6) {
 			objectDropCategory = 0;			//Roll over
 		}
+		objectDropType = 0;
 	}
 
 	if (button(C_but)) {						//Cycle through 8 palettes
@@ -4421,7 +4560,7 @@ void saveObject(int which) {
 	writeByte(object[which].xSentryRight >> 8);	
 	writeByte(object[which].xSentryRight & 0x0FF);	
 	
-	writeBool(object[which].extraX);					
+	writeBool(object[which].moving);					
 	writeBool(object[which].extraY);
 			
 	writeByte(object[which].extraA);	
@@ -4463,7 +4602,7 @@ void loadObject(int which) {
 	object[which].xSentryRight = readByte() << 8;
 	object[which].xSentryRight |= readByte();	
 	
-	object[which].extraX = readBool();				
+	object[which].moving = readBool();				
 	object[which].extraY = readBool();
 			
 	object[which].extraA = readByte();		

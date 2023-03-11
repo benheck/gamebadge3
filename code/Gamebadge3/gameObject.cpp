@@ -21,7 +21,7 @@ bool gameObject::hitBox(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {			//Ch
 
 	int x1Lap = x1 - xPos;
 	int x2Lap = x2 - xPos;	
-	
+
 	int pixelWidth = width << 3;
 	int pixelHeight = height << 3;
 
@@ -74,34 +74,54 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 	int offsetX = 0;
 	int offsetY = 0;
 
-	if (state == 99) {						//Object falling?
+	if (state == 99 && moving == true) {						//Object falling?
 		yPos += animate;
 		if (animate < 8) {
 			animate++;
 		}
 		if (yPos > (119 - (height << 3))) {		//Object hit the floor?
-			state = 100;
+			state = 100;					//Flag for main logic
+			yPos = 104;						//On floor
+			sheetX = 8 + random(0, 5);		//Turn object to rubble
+			sheetY = 32 + 15;
+			height = 1;						//Same width, height of 1 tile
 		}
 	}
 
 	if (category == 0) {						//Gameplay objects?
 		
-		if (type < 4 && extraX == true) {		//Evil robuts
+		if (type < 4 && moving == true) {		//Evil robuts
+
+			if (turning == true) {
+				offsetX += width;						//Robot turning face
+				if (--animate == 0) {
+					turning = false;
+				}		
+			}
 			
 			if (dir == false) {
 				if (++xPos > (xSentryRight - (width * 8))) {		//Sub robot width from right edge, since we are checking left edge of robot xPos
 					dir = true;
+					turning = true;
+					animate = 4;
 				}
 			}
 			else {
 				if (--xPos < (xSentryLeft)) {
 					dir = false;
+					turning = true;
+					animate = 4;					
 				}			
 			}
 			
 		}
 
-		if (type == 4 && extraX == true) {		//Cute kitten
+		if (type == 4 && moving == true) {		//Cute kitten
+
+			if (xSentryLeft > 0) {		//Used as a debounce when Bud whacks kitten
+				--xSentryLeft;
+			}
+
 
 			if (state == 200) {			
 				drawSprite(xPos - worldX, yPos, 12, 48 + 5, 1, 3, palette, true, false);			//Kitten first
@@ -144,7 +164,7 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 			}	
 		}		
 	
-		if (type == 5 && extraX == true) {		//Greenie?
+		if (type == 5 && moving == true) {		//Greenie?
 			
 			drawSprite(xPos - worldX, yPos, 0x06, 16 + animate, 5, false, false);
 

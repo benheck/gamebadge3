@@ -49,7 +49,7 @@ class gameObject
 	uint16_t xSentryLeft = 0;
 	uint16_t xSentryRight = 120;
 	
-	bool extraX = false;					
+	bool moving = false;					
 	bool extraY = false;
 			
 	uint8_t extraA = 0;
