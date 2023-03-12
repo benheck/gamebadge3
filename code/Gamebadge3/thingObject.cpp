@@ -158,11 +158,11 @@ void thingObject::scanC3(uint16_t worldX, uint16_t worldY) {
 	switch(state) {
 		
 		case 0:
-			drawSprite(xPos - worldX, yPos, 4, 32 + 12, 4, 3, 6, false, false);
+			drawSprite(xPos - worldX, yPos, 4, 32 + 12, 4, 3, 6, false, false);			//Intact window
 		break;
 			
 		case 1:
-			drawSprite(xPos - worldX, yPos, 0, 32 + 12, 4, 3, 6, false, false);	
+			drawSprite(xPos - worldX, yPos, 0, 32 + 12, 4, 3, 6, false, false);			//Broken window
 		break;
 		
 	}	

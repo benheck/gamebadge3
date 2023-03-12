@@ -103,13 +103,14 @@ bool chandelierFalling = false;
 int cWF = 0xFF;						//Stands for chandelier which falling it's short so functions don't get insane
 
 int currentFloor = 1;
-int currentCondo = 1;				//Which condo we've selected
+int currentCondo = 0;				//Which condo we've selected
 
 int doorTilePos[6] = { 16, 34, 52, 92, 110, 128 };
 
+//0x80 = Apartment cleared 0x40 = Door open, ready to enter. If cleared number is changed to XX and can't be re-opened
 char apartmentState[7] = { 0, 0, 0, 0, 0, 0, 0 };	//Zero index not used, starts at 1 goes to 6
 
-bool elevatorOpen = true;
+bool elevatorOpen = false;
 
 int inArrowFrame = 0;
 
@@ -242,6 +243,17 @@ bool fallingObjectState[16];			//Keep track of up to 16 falling objects (can't p
 int fallingObjectIndex[16];
 
 int kittenMeow = 0;
+
+int hallwayBudSpawn = 0;				//0 = through glass 1-6 in front of a cleared condo door 10 = in front of elevator (when stage change or die/respawn in hallway)
+
+int budExitingWhat = 0;					//1 = condo door 2 = elevator
+
+bool budVisible = false;
+
+int seconds;							//How long it took to beat a floor
+int minutes;
+
+bool levelComplete = false;				//After each condo exit check all apt stats, if all = clear open elevator and set this true. Allows exit to next floor
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -508,6 +520,19 @@ void gameFrame() {
 			
 			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
+			if (button(left_but)) {
+				if (--currentFloor < 1) {
+					currentFloor = 6;
+				}
+			}
+			if (button(right_but)) {
+				if (++currentFloor > 6) {
+					currentFloor = 1;
+				}
+			}			
+			
+			tileDirect(cursorX, 8, (((currentFloor - 1) * 16) + 128) + 15);
+
 			if (button(up_but)) {
 				if (cursorY > 9) {
 					cursorY--;
@@ -562,13 +587,8 @@ void gameFrame() {
 			}			
 		break;
 					
-		case game:
-			currentFloor = 1;			//Setup game here
-			budLives = 9;
-			switchGameTo(goHallway);
-			//switchGameTo(goCondo);
-			//gameLogic();
-			
+		case game:		
+			startGame();			
 			break;
 			
 		case goHallway:
@@ -576,7 +596,7 @@ void gameFrame() {
 				setupHallway();
 				currentMap = 1;		//Hallway
 			}
-			gameLogic();
+			hallwayLogic();
 			break;
 			
 		case goCondo:
@@ -660,6 +680,10 @@ void drawTitleScreen() {
 	setButtonDebounce(left_but, true, 1);
 	setButtonDebounce(right_but, true, 1);	
 	
+	setButtonDebounce(A_but, true, 1);
+	setButtonDebounce(B_but, true, 1);
+	setButtonDebounce(C_but, true, 1);
+	
 	menuTimer = random(50, 150);
 	cursorTimer = 0;
 	cursorX = 9;
@@ -690,6 +714,41 @@ void drawPauseMenu() {
 	
 	isDrawn = true;
 	displayPause = false;   		//Allow core 2 to draw
+	
+}
+
+void startGame() {
+
+	//currentFloor = 1;			//Setup game here
+	currentCondo = 0;			//Bud hasn't entered a condo
+	budLives = 9;
+	hallwayBudSpawn = 0;		//Bud jumps through glass
+
+	elevatorOpen = false;				//Level starting (if die in hallway, spawn in front of closed elevator)
+	
+	stopWatchClear();
+	switchGameTo(goHallway);
+
+	
+}
+
+void startNewFloor() {
+
+	currentFloor++;
+	currentCondo = 0;			//Bud hasn't entered a condo on this floor yet
+
+	budExitingWhat =  2;				//Elevator
+	hallwayBudSpawn = 10;				//Bud spawns in front of the elevator
+	elevatorOpen = false;				//Level starting (if die in hallway, spawn in front of closed elevator)
+	
+	budVisible = false;
+	budState = exiting;
+	budFrame = 0;
+	jump = 0;	
+	
+	stopWatchClear();
+	switchGameTo(goHallway);	//
+
 	
 }
 
@@ -744,6 +803,8 @@ void jailLogic() {
 
 
 void setupCondo(int whichFloor, int whichCondo) {
+	
+	stopAudio();
 	
 	clearObjects();
 
@@ -878,6 +939,8 @@ void drawCondoStrip(int condoStripX, int nameTableX) {
 
 void condoLogic() {
 
+	stopWatchTick();
+
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
 		if (kittenMessageTimer > 0) {
 				
@@ -953,8 +1016,9 @@ void condoLogic() {
 	// drawSpriteDecimal(xWindowCoarse, 8, 16, 0);
 	// drawSpriteDecimal(xLevelStripRight, 8, 24, 0);	
 	
-	// drawSpriteDecimal(budX, 80, 0, 0);
-	// drawSpriteDecimal(budY, 80, 8, 0);
+	// drawSpriteDecimal(budX, 60, 0, 0);
+	// drawSpriteDecimal(budWorldX, 90, 0, 0);	
+	
 	// drawSpriteDecimal(xWindowBudToTile, 80, 16, 0);
 	// drawSpriteDecimal(budY >> 3, 80, 24, 0);
 	// drawSpriteDecimal(jump, 80, 32, 0);
@@ -1070,7 +1134,7 @@ void condoLogic() {
 					
 					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {						
 						fallListAdd(g);							//Add this item to the fall list						
-						playAudio("audio/glass_loose.wav");	
+						playAudio("audio/slap.wav");	
 						object[g].state = 99;					//Falling
 						object[g].animate = 1;
 					}
@@ -1191,108 +1255,6 @@ void movingObjects(bool state) {
 	
 }
 
-
-bool condoMoveLeft(int theSpeed) {
-
-	if (budX > 48) {
-		return false;
-	}
-	
-	xWindowFine -= theSpeed;				//Move fine scroll		
-	
-	budWorldX -= theSpeed;
-	worldX -= theSpeed;
-	
-	if (xWindowFine < 0) {				//Passed tile boundary?
-	
-		if (xLevelCoarse == 0) {		//At left edge?
-			xWindowFine = 0;			//Clear out fine register, we can't go further left
-			worldX += theSpeed;
-			budWorldX += theSpeed;
-			return false;
-		}
-
-		xWindowFine += 8;				//Subtract fine		
-		
-		xWindowCoarse = windowCheckLeft(xWindowCoarse);
-		xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		xStripLeft = windowCheckLeft(xStripLeft);
-		xStripRight = windowCheckLeft(xStripRight);
-
-		xLevelStripLeft--;
-		
-		if (xLevelStripLeft < 0) {
-			xLevelStripLeft += 120;
-		}
-		
-		xLevelCoarse--;
-		
-		xLevelStripRight--;		
-		
-		if (xLevelStripRight < 0) {
-			xLevelStripRight += 120;
-		}
-
-		xStripDrawing = xStripLeft;			//Where to draw new tiles on tilemap
-		
-		drawCondoStrip(xLevelStripLeft, xStripLeft);
-
-	}	
-	
-	return true;
-		
-}
-
-bool condoMoveRight(int theSpeed) {
-	
-	if (budX < 56) {
-		return false;
-	}
-	
-	budWorldX += theSpeed;
-	xWindowFine += theSpeed;				//Move fine scroll		
-	
-	worldX += theSpeed;	
-	
-	if (xWindowFine > 7) {				//Passed tile boundary?
-	
-		if (xLevelCoarse == 104) {		//At right edge?
-			xWindowFine = 7;			//Max out fine register, we can't go further right
-			worldX -= theSpeed;
-			budWorldX -= theSpeed;
-			return false;
-		}
-	
-		xWindowFine -= 8;				//Subtract fine		
-		
-		xWindowCoarse = windowCheckRight(xWindowCoarse);
-		xWindowBudToTile = windowCheckRight(xWindowBudToTile);
-		xStripLeft = windowCheckRight(xStripLeft);
-		xStripRight = windowCheckRight(xStripRight);
-
-		xLevelStripLeft++;
-		
-		if (xLevelStripLeft > 119) {
-			xLevelStripLeft -= 120;
-		}
-		
-		xLevelCoarse++;
-		
-		xLevelStripRight++;		
-		
-		if (xLevelStripRight > 119) {
-			xLevelStripRight -= 120;
-		}
-
-		xStripDrawing = xStripRight;			//Where to draw new tiles on tilemap
-		
-		drawCondoStrip(xLevelStripRight, xStripRight);		
-
-	}
-
-	return true;
-	
-}
 
 
 
@@ -1765,49 +1727,238 @@ void budLogic2() {
 	// }	
 	
 	if (button(A_but)) {
-		//random cat sounds
+		playAudio("audio/hitModem.wav");
 	}		
 	
 	
 }
 
+bool budMoveLeftC(int speed) {
 
+	if (budY > -1) {		//Tile obstacle check first
+		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
+			return false;
+		}		
+	}
 
-void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
-
-	budFrame = 0;
-	budSubFrame = 0;
-	budDir = false;											//True = going left
-
-	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
-	budY = budStartFineY;
-	
-	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
-	budWorldY = budStartFineY;
-	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
-
-	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
-	worldY = 0;
-
-	xWindowFine = 0;										//The fine scrolling amount
-	xWindowCoarse = windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
-	xWindowBudToTile = xWindowCoarse + (budStartCoarseX + 1);		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
+	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
 		
-	xStripLeft = xWindowCoarse - budStartCoarseX;	//6				//Set the left draw edge in the tilemap
-	
-	if (xStripLeft < 0) {							//Handle negative rollover
-		xStripLeft += 32;
+		budX -= speed;
+		budWorldX -= speed;
+		xWindowBudFine -= speed;
+		
+		if (xWindowBudFine < 0) {				//Passed tile boundary?
+			xWindowBudFine += 8;			//Reset fine bud screen scroll
+			
+			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
+		}	
+
+		if (budX < 8) {
+			if (true) { //kittenCount == kittenTotal) {
+				exitCondo();
+			}
+			else {
+				if (kittenMessageTimer == 0) {
+					kittenMessageTimer = 60;	
+					playAudio("audio/taunt.wav");
+				}
+			}
+		}
 	}
 	
-	xStripRight = ((xStripLeft + 26) & 0x1F);		//Compute right edge
-	
-	xLevelStripLeft = windowStartCoarseX - budStartCoarseX;		//Strip redraw position on left (when moving left)
-	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
-	xLevelStripRight = xLevelStripLeft + 26;	//6	//Strip redraw position on right (when moving right)
-
+	return true;
 }
 
-void gameLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
+bool budMoveRightC(int speed) {
+
+	if (budY > -1) {							//Tile obstacle check first
+		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
+			return false;
+		}		
+	}
+
+	if (condoMoveRight(speed) == false) {		//Can window NOT scroll right?
+		budX += speed;
+		budWorldX += speed;
+		xWindowBudFine += speed;
+		
+		if (xWindowBudFine > 7) {				//Passed tile boundary?
+			xWindowBudFine -= 8;			//Reset fine bud screen scroll
+			
+			xWindowBudToTile = windowCheckRight(xWindowBudToTile);
+		}			
+	}
+	
+	return true;
+}
+
+bool condoMoveLeft(int theSpeed) {
+
+	if (budX > 48) {
+		return false;
+	}
+	
+	xWindowFine -= theSpeed;				//Move fine scroll		
+	
+	budWorldX -= theSpeed;
+	worldX -= theSpeed;
+	
+	if (xWindowFine < 0) {				//Passed tile boundary?
+	
+		if (xLevelCoarse == 0) {		//At left edge?
+			xWindowFine = 0;			//Clear out fine register, we can't go further left
+			worldX += theSpeed;
+			budWorldX += theSpeed;
+			return false;				//Bud can now move past his scroll edge
+		}
+
+		xWindowFine += 8;				//Subtract fine		
+		
+		xWindowCoarse = windowCheckLeft(xWindowCoarse);
+		xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
+		xStripLeft = windowCheckLeft(xStripLeft);
+		xStripRight = windowCheckLeft(xStripRight);
+
+		xLevelStripLeft--;
+		
+		if (xLevelStripLeft < 0) {
+			xLevelStripLeft += 120;
+		}
+		
+		xLevelCoarse--;
+		
+		xLevelStripRight--;		
+		
+		if (xLevelStripRight < 0) {
+			xLevelStripRight += 120;
+		}
+
+		xStripDrawing = xStripLeft;			//Where to draw new tiles on tilemap
+		
+		drawCondoStrip(xLevelStripLeft, xStripLeft);
+
+	}	
+	
+	return true;
+		
+}
+
+bool condoMoveRight(int theSpeed) {
+	
+	if (budX < 56) {
+		return false;
+	}
+	
+	budWorldX += theSpeed;
+	xWindowFine += theSpeed;				//Move fine scroll		
+	
+	worldX += theSpeed;	
+	
+	if (xWindowFine > 7) {				//Passed tile boundary?
+	
+		if (xLevelCoarse == 104) {		//At right edge?
+			xWindowFine = 7;			//Max out fine register, we can't go further right
+			worldX -= theSpeed;
+			budWorldX -= theSpeed;
+			return false;				//Bud can now move past his scroll edge
+		}
+	
+		xWindowFine -= 8;				//Subtract fine		
+		
+		xWindowCoarse = windowCheckRight(xWindowCoarse);
+		xWindowBudToTile = windowCheckRight(xWindowBudToTile);
+		xStripLeft = windowCheckRight(xStripLeft);
+		xStripRight = windowCheckRight(xStripRight);
+
+		xLevelStripLeft++;
+		
+		if (xLevelStripLeft > 119) {
+			xLevelStripLeft -= 120;
+		}
+		
+		xLevelCoarse++;
+		
+		xLevelStripRight++;		
+		
+		if (xLevelStripRight > 119) {
+			xLevelStripRight -= 120;
+		}
+
+		xStripDrawing = xStripRight;			//Where to draw new tiles on tilemap
+		
+		drawCondoStrip(xLevelStripRight, xStripRight);		
+
+	}
+
+	return true;
+	
+}
+
+void exitCondo() {
+	
+	stopAudio();
+	
+	apartmentState[currentCondo - 1] = 0xC0;	//Set apartment as door open + cleared
+	
+	hallwayBudSpawn = currentCondo;				//Bud spawns in front of the door
+	
+	budVisible = true;
+	budExitingWhat = 1;			//Exiting condo
+	budState = exiting;
+	budFrame = 0;
+	jump = 0;
+	
+	kittenMessageTimer = 0;				//Clear timer in case a message was on when Bud left
+	
+	int count = 0;
+	
+	for (int x = 0 ; x < 6 ; x++) {
+		if (apartmentState[x] & 0x80) {
+			count++;
+		}
+	}
+	
+	if (count == 6) {
+		levelComplete = true;
+		elevatorOpen = true;
+		kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
+	}
+	
+	//Add option so message is either "GOTO ELEVATOR" or "X CONDOS LEFT"
+
+	switchGameTo(goHallway);
+	
+}
+
+
+void stopWatchTick() {
+
+	if (++seconds == 60) {
+		seconds = 0;
+		++minutes;
+	}
+	
+}
+
+void stopWatchClear() {
+
+	seconds = 0;
+	minutes = 0;
+	
+}
+
+void hallwayLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
+
+	stopWatchTick();
+
+	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
+		if (kittenMessageTimer > 0) {
+			if (kittenMessageTimer & 0x04) {
+				drawSpriteText("GOTO ELEVATOR", 8, 56, 3);
+			}	
+			kittenMessageTimer--;
+		}
+	}
 
 	if (budSpawned == true) {
 		budLogic();
@@ -1818,7 +1969,7 @@ void gameLogic() { //--------------------This is called at 30Hz. Your main game 
 			jump = 6;
 			velocikitten = 5;
 			thingAdd(hallGlass, 80, 48);			//Spawn broken glass
-			thing[entryWindow].state = 1;			//Break the window
+			thing[entryWindow].state = 1;			//Break the existing window
 			playAudio("audio/glass_2.wav");
 		}
 	}
@@ -1877,6 +2028,8 @@ void budLogic() {
 	bool budNoMove = true;
 	
 	//drawSprite(budX, budY, 0x9F, 4, false, false);
+
+	bool moveSuppress = false;
 
 	switch(budState) {
 	
@@ -1987,8 +2140,69 @@ void budLogic() {
 			}	
 			break;
 
+		case exiting:
+		
+			moveSuppress = true;
+		
+			if (budVisible == true) {
+				drawSprite(budX + 4, budY - 8, 7, 16 + 5, 1, 2, 4, budDir, false);	
+			}	
+		
+			if (animateBud) {
+				if (budFrame & 0x02) {
+					budDir = false;
+				}					
+				else {
+					budDir = true;
+				}
+				
+				if (budExitingWhat == 1) {									//Exiting a condo?
+				
+					if (++budFrame > 10) {
+						budFrame = 0;
+						budState = rest;
+						budDir = false;
+						
+						apartmentState[currentCondo - 1] = 0x80;				//Set door closed, apt clear
+						playAudio("audio/doorOpen.wav");
+						populateDoor(doorTilePos[currentCondo - 1], currentCondo, false);		//CLOSE THE DOOR ALEX THERE'S A DRAFT!				
+						redrawCurrentHallway();	
+
+						//switchGameTo(goCondo);
+					}				
+						
+				}
+				else {
+					
+					budFrame++;
+					
+					if (budFrame == 5) {
+						budVisible = true;					//He's visible once the doors open
+						playAudio("audio/elevDing.wav");
+						elevatorOpen = true;				//Doors open, 10 frames on 2's open
+						redrawCurrentHallway();						
+					}
+									
+					if (budFrame == 15) {					//then close, now Bud can move
+						budFrame = 0;
+						budState = rest;
+						budDir = false;
+						elevatorOpen = false;							
+						redrawCurrentHallway();	
+					}					
+
+				}				
+				
+				
+
+			}		
+		
+			break;
 	
 		case entering:
+		
+			moveSuppress = true;
+		
 			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
 		
 			if (animateBud) {
@@ -2008,157 +2222,169 @@ void budLogic() {
 
 	}
 
-	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
-		if (++jump < 12) {				//Jump up with decreasing velocity	
-			budY -= velocikitten;
-			budWorldY -= velocikitten;
-			if (velocikitten > 1) {				
-				velocikitten--;
-			}
-		}
-		else {							//Hit top? Set falling and reset velocity
-			jump = 128;
-			velocikitten = 2;
-		}
-		
-	}
-	
-	if (jump == 0 || jump == 128) {		//Walked off a ledge or coming down from a jump?
-	
-		bool fallEdge = false;
-		
-		//if (budDir == true) {			//Facing left?
-			if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
-				fallEdge = true;
-			}
-		// }
-		// else {							//Facing right
-			// if (getTileType(budTileCheck(-1), (budY >> 3)) == 0 && getTileType(budTileCheck(0), (budY >> 3)) == 0) {	//Nothing below?
-				// fallEdge = true;
-			// }			
-		// }
-	
-	
-	
-		if (fallEdge == true) {			//Nothing below?
-		
-			if (jump == 0) {			//Weren't already falling?
-				velocikitten = 2;		//Means we walked off a ledge, reset velocity
-				jump = 128;				//Set falling state
-				//budState = jumping;
-			}
 
-			budY += velocikitten;					//Fall
-			budWorldY += velocikitten;
-			if (velocikitten < 8) {
-				velocikitten++;
+	//SUPPRESS MOVE on ENTER EXIT / WINDOW
+
+	if (moveSuppress == false) {
+
+		if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
+			if (++jump < 12) {				//Jump up with decreasing velocity	
+				budY -= velocikitten;
+				budWorldY -= velocikitten;
+				if (velocikitten > 1) {				
+					velocikitten--;
+				}
 			}
+			else {							//Hit top? Set falling and reset velocity
+				jump = 128;
+				velocikitten = 2;
+			}
+			
 		}
-		else {
-			if (jump == 128) {				//Were we falling? Clear flag
-				jump = 0;					//Something below? Clear jump flag
-				budY &= 0xF8;
-				budWorldY &= 0xF8;
+		
+		if (jump == 0 || jump == 128) {		//Walked off a ledge or coming down from a jump?
+		
+			bool fallEdge = false;
+			
+			//if (budDir == true) {			//Facing left?
+				if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
+					fallEdge = true;
+				}
+			// }
+			// else {							//Facing right
+				// if (getTileType(budTileCheck(-1), (budY >> 3)) == 0 && getTileType(budTileCheck(0), (budY >> 3)) == 0) {	//Nothing below?
+					// fallEdge = true;
+				// }			
+			// }
+		
+		
+		
+			if (fallEdge == true) {			//Nothing below?
+			
+				if (jump == 0) {			//Weren't already falling?
+					velocikitten = 2;		//Means we walked off a ledge, reset velocity
+					jump = 128;				//Set falling state
+					//budState = jumping;
+				}
+
+				budY += velocikitten;					//Fall
+				budWorldY += velocikitten;
+				if (velocikitten < 8) {
+					velocikitten++;
+				}
+			}
+			else {
+				if (jump == 128) {				//Were we falling? Clear flag
+					jump = 0;					//Something below? Clear jump flag
+					budY &= 0xF8;
+					budWorldY &= 0xF8;
+					budState = rest;
+				}		
+			}
+		
+		}
+
+		
+		if (button(C_but)) {
+			//playAudio("audio/back.wav");
+			//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
+			//dutyOut = 50;
+			//pwm_set_freq_duty(12, 493, 25);
+			
+			if (jump == 0) {
+				jump = 1;
+				velocikitten = 9;
+				budNoMove = false;
+				//budState = jumping;	
+			}
+			
+		}
+
+		if (budSwipe < 99 && animateBud == true) {
+			if (++budSwipe > 2) {
+				budSwipe = 99;
 				budState = rest;
-			}		
+			}
 		}
-	
-	}
 
-	if (button(C_but)) {
-		//playAudio("audio/back.wav");
-		//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
-		//dutyOut = 50;
-		//pwm_set_freq_duty(12, 493, 25);
+		if (button(B_but) && jump == 0) {		//Can't swipe while jumping
 		
-		if (jump == 0) {
-			jump = 1;
-			velocikitten = 9;
+			if (budSwipe == 99) {
+				budSwipe = 0;	
+				budState = swiping;
+			}
+			
+			thingAdd(bigRobot, 100, 64);
+		
+		}
+
+		
+		if (button(left_but)) {
+			budDir = true;
+		
+			switch(budState) {
+			
+				case rest:
+					budState = moving;
+					budFrame = 0;
+					break;
+					
+				case moving:
+					budDir = true;
+					//bud moves xPos change
+					break;	
+					
+				case jumping:
+					moveJump = true;
+					budDir = true;
+					//bud moves xPos change
+					break;				
+
+				case stopping:
+					budState = moving;
+					break;
+		
+			}
 			budNoMove = false;
-			//budState = jumping;	
+			
 		}
 		
-	}
+		if (button(right_but)) {
+			budDir = false;
+			
+			switch(budState) {
+			
+				case rest:
+					budState = moving;
+					budFrame = 0;
+					break;
+					
+				case moving:
+					budDir = false;
+					//bud moves xPos change
+					break;
 
-	if (budSwipe < 99 && animateBud == true) {
-		if (++budSwipe > 2) {
-			budSwipe = 99;
-			budState = rest;
-		}
-	}
+				case jumping:
+					moveJump = true;
+					budDir = false;
+					//bud moves xPos change
+					break;					
 
-	if (button(B_but) && jump == 0) {		//Can't swipe while jumping
-	
-		if (budSwipe == 99) {
-			budSwipe = 0;	
-			budState = swiping;
-		}
+				case stopping:
+					budState = moving;
+					break;
 		
-		thingAdd(bigRobot, 100, 64);
-	
-	}
+			}
+			budNoMove = false;
 
-	
-	if (button(left_but)) {
-		budDir = true;
-	
-		switch(budState) {
-		
-			case rest:
-				budState = moving;
-				budFrame = 0;
-				break;
+		}
 				
-			case moving:
-				budDir = true;
-				//bud moves xPos change
-				break;	
-				
-			case jumping:
-				moveJump = true;
-				budDir = true;
-				//bud moves xPos change
-				break;				
-
-			case stopping:
-				budState = moving;
-				break;
-	
-		}
-		budNoMove = false;
 		
 	}
-	
-	if (button(right_but)) {
-		budDir = false;
-		
-		switch(budState) {
-		
-			case rest:
-				budState = moving;
-				budFrame = 0;
-				break;
-				
-			case moving:
-				budDir = false;
-				//bud moves xPos change
-				break;
 
-			case jumping:
-				moveJump = true;
-				budDir = false;
-				//bud moves xPos change
-				break;					
 
-			case stopping:
-				budState = moving;
-				break;
-	
-		}
-		budNoMove = false;
 
-	}
-	
+
 
 	if (budNoMove == true && budState == moving) {		//Was Bud moving, but then d-pad released? Bud comes to a stop
 		budState = rest;
@@ -2195,7 +2421,7 @@ void budLogic() {
 
 	if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
 		
-		if (elevatorOpen == true) {							//Ready for the next level?
+		if (elevatorOpen == true && hallwayBudSpawn != 10) {						//Ready for the next level?
 
 			if (button(up_but)) {
 				playAudio("audio/elevDing.wav");
@@ -2246,15 +2472,72 @@ void setupHallway() {
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
-	//spawnIntoHallway(52 - 6, 5, 40);
-	spawnIntoHallway(6, 5, 40);
+	switch(hallwayBudSpawn) {
 	
-	drawHallway(1);	
+		case 0:				//Breaking glass stage 1
+			budSpawned = false;
+			budSpawnTimer = 0;
+			spawnIntoHallway(6, 5, 40);
+			break;
+			
+			
+		case 10:			//Emerge from elevator (stage 2-6)
+			budSpawned = true;
+			budDir = false;		
+			spawnIntoHallway(66, 7, 104);
+			break;
+			
+		default:			//Emerge from cleared condo
+			budSpawned = true;
+			budDir = false;			
+			spawnIntoHallway(doorTilePos[currentCondo - 1] - 6, 7, 104);		
+			break;
+	
+	}
+
+	drawHallway(currentFloor);	
 
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;	
 	
 }
+
+
+
+void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
+
+	budFrame = 0;
+	budSubFrame = 0;
+	budDir = false;											//True = going left
+
+	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
+	budY = budStartFineY;
+	
+	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
+	budWorldY = budStartFineY;
+	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
+
+	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
+	worldY = 0;
+
+	xWindowFine = 0;										//The fine scrolling amount
+	xWindowCoarse = windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
+	xWindowBudToTile = xWindowCoarse + (budStartCoarseX + 1);		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
+		
+	xStripLeft = xWindowCoarse - budStartCoarseX;	//6				//Set the left draw edge in the tilemap
+	
+	if (xStripLeft < 0) {							//Handle negative rollover
+		xStripLeft += 32;
+	}
+	
+	xStripRight = ((xStripLeft + 26) & 0x1F);		//Compute right edge
+	
+	xLevelStripLeft = windowStartCoarseX - budStartCoarseX;		//Strip redraw position on left (when moving left)
+	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
+	xLevelStripRight = xLevelStripLeft + 26;	//6	//Strip redraw position on right (when moving right)
+
+}
+
 
 void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
 	
@@ -2274,58 +2557,14 @@ void setBudAttackBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
 }
 
 
-bool budMoveLeftC(int speed) {
-
-	if (budY > -1) {
-		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
-			return false;
-		}		
-	}
-	
-	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
-		budX -= speed;
-		budWorldX -= speed;
-		xWindowBudFine -= speed;
-		
-		if (xWindowBudFine < 0) {				//Passed tile boundary?
-			xWindowBudFine += 8;			//Reset fine bud screen scroll
-			
-			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		}			
-	}
-	
-	return true;
-}
-
-bool budMoveRightC(int speed) {
-
-	if (budY > -1) {
-		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
-			return false;
-		}		
-	}
-
-	if (condoMoveRight(speed) == false) {		//Can window NOT scroll left?
-		budX += speed;
-		budWorldX += speed;
-		xWindowBudFine += speed;
-		
-		if (xWindowBudFine > 7) {				//Passed tile boundary?
-			xWindowBudFine -= 8;			//Reset fine bud screen scroll
-			
-			xWindowBudToTile = windowCheckRight(xWindowBudToTile);
-		}			
-	}
-	
-	return true;
-}
-
 
 
 bool budMoveLeft(int speed) {
 
-	if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
-		return false;
+	if (budY > -1) {		//Tile obstacle check first
+		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
+			return false;
+		}		
 	}
 		
 	if (windowMoveLeft(speed) == false) {		//Can window NOT scroll left?
@@ -2345,10 +2584,12 @@ bool budMoveLeft(int speed) {
 
 bool budMoveRight(int speed) {
 
-	if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
-		return false;
+	if (budY > -1) {		//Tile obstacle check first
+		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
+			return false;
+		}	
 	}
-	
+
 	if (windowMoveRight(speed) == false) {		//Can window NOT scroll left?
 		budX += speed;
 		budWorldX += speed;
@@ -2506,7 +2747,7 @@ int checkDoors() {
 	
 	}
 
-	return -1;
+	return -1;			//Not in front of a door
 	
 }
 
@@ -2570,8 +2811,13 @@ void drawHallway(int floor) {
 	
 	for (int x = 0 ; x < 6 ; x++) {
 	
-		populateDoor(doorTilePos[x], x + 1, false);
-		
+		if (apartmentState[x] & 0x40) {			//Door open bit set? (bud emerging from condo)
+			populateDoor(doorTilePos[x], x + 1, true);
+		}
+		else {
+			populateDoor(doorTilePos[x], x + 1, false);
+		}
+
 	}
 	
 
@@ -2582,7 +2828,21 @@ void drawHallway(int floor) {
 	}
 	
 	entryWindow = thingAdd(hallWindow, 80, 48);			//Get the index for this one
-	thingAdd(hallWindow, 1071, 48);	
+	
+	if (currentCondo > 0) {							//Bud has already been in a condo?
+		if (floor == 1) {
+			thing[entryWindow].state = 1;				//Window was already broken
+		}
+		else {
+			thing[entryWindow].state = 0;				//Broken window only on first floor			
+		}
+		
+	}
+	else {
+		thing[entryWindow].state = 0;				//Intact window, will be broken
+	}
+
+	thingAdd(hallWindow, 1071, 48);						//Other window
 	
 	thingAdd(chandelier, 200, 0);
 	thingAdd(chandelier, 344, 0);	
@@ -2834,7 +3094,7 @@ void hallwayDoorStripClosed(int whichStrip, int whichDoorNum) {		//Hallway objec
 	}
 	
 	if (whichStrip == 1) {		
-		if (apartmentState[whichDoorNum & 0x0F] & 0x80) {		//Apartment destoyed? (MSB set)
+		if (apartmentState[(whichDoorNum & 0x0F) - 1] & 0x80) {		//Apartment destoyed? (MSB set)
 			drawTile(xStripDrawing, 8, 0x9F, 0);				//Draw X
 		}
 		else {
@@ -2842,7 +3102,7 @@ void hallwayDoorStripClosed(int whichStrip, int whichDoorNum) {		//Hallway objec
 		}
 	}
 	if (whichStrip == 2) {
-		if (apartmentState[whichDoorNum & 0x0F] == 255) {		//Apartment destoyed?
+		if (apartmentState[(whichDoorNum & 0x0F) - 1] & 0x80) {		//Apartment destoyed?
 			drawTile(xStripDrawing, 8, 0x9F, 0);				//Draw X
 		}
 		else {
@@ -3670,7 +3930,7 @@ void editLogic() {
 			setButtonDebounce(down_but, true, 1);
 			setButtonDebounce(left_but, true, 1);
 			setButtonDebounce(right_but, true, 1);	
-			setButtonDebounce(A_but, true, 0);			//A is debounced using auto system in menus
+			setButtonDebounce(A_but, true, 1);			//A is debounced using auto system in menus
 			bButtonFlag = true;
 
 		}
