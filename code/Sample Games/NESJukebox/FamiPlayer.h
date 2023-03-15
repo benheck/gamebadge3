@@ -2,26 +2,31 @@
 #define FAMIPLAYER_H
 #pragma once
 
-#include <vector>
-#include "pico/time.h"
-#include "pico/stdlib.h"
+#include "SdFat.h"
 
-#define PULSE1      6
-#define PULSE2      8
-#define TRIANGLE    10
-#define NOISE       12
+#define PULSE1      6                           // GPIO for the Pulse Wave Channel #1
+#define PULSE2      8                           // GPIO for the Pulse Wave Channel #2
+#define TRIANGLE    10                          // GPIO for the Triangle Wave Channel
+#define NOISE       12                          // GPIO for the Noise Channel
+#define BUF_SZ      32                          // Size of the buffer (in notes). 60 notes = 1 second of audio
+#define NUM_TRACKS  8                           // Maximum number of tracks to hold
+#define HEAD_SZ     4                           // Size of the audio header (in bytes)
 
 class FamiTrack {
     public:
-        bool wasPlaying = false;
-        bool playing = false;
-        bool loop = false;
-        int noteCounter = 0;
-        int numNotes = 0;
-        uint16_t *chPulse1 = nullptr;
-        uint16_t *chPulse2 = nullptr;
-        uint16_t *chTriangle = nullptr;
-        uint16_t *chNoise = nullptr;
+        bool wasPlaying = false;                // Indicates if the track was just played (stays true the entire time the track plays)
+        bool playing = false;                   // Indicates if the track is currently playing
+        bool loop = false;                      // If true, track repeats when finished
+        int curBufCtr = 0;                      // Represents which note index is currently being played in the buffer
+        int numNotes = 0;                       // Total number of notes in the track
+        int curNote = 0;                        // Keeps track of which note is currently being played relative to the size of the entire track
+        int bufferIndex = 0;                    // Keeps track of where we are in the source file
+        const char *fileName;                   // Name of the audio file to load
+        
+        uint16_t chPulse1[BUF_SZ];              // Buffer for the Pulse channel #1
+        uint16_t chPulse2[BUF_SZ];              // Buffer for the Pulse channel #2
+        uint16_t chTriangle[BUF_SZ];            // Buffer for the Triangle wave channel
+        uint16_t chNoise[BUF_SZ];               // Buffer for the Noise channel
 };
 
 class FamiPlayer
@@ -36,11 +41,14 @@ class FamiPlayer
         void serviceTracks();
         void PlayTrack(int trackNum);
         void StopTrack(int trackNum);
-        uint16_t AddTrack(uint16_t *chPulse1, uint16_t *chPulse2, uint16_t *chTriangle, uint16_t *chNoise, int size, bool loop=false);
+        bool IsPlaying(int trackNum);
+        uint16_t AddTrack(const char *filename, uint8_t slot, bool loop=false);
+        void FillBuffer(FamiTrack *pF);
         void ProcessWave();
         
+        int numNotesTemp = 0;
         uint16_t noteFreq[64] = {0, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 123, 131, 139, 147, 156, 165, 175, 185, 196, 208, 220, 233, 247, 262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494, 523, 554, 587, 622, 659, 698, 740, 784, 831, 880, 932, 988, 1047, 1109, 1175, 1245, 1319, 1397, 1480, 1568, 1661, 1760, 1865, 1976, 2093, 2217, 2349 };
-        std::vector<FamiTrack> tracks;
+        FamiTrack tracks[NUM_TRACKS];
         uint32_t seed;
 
         uint32_t triangleFreqCounter = 0;
