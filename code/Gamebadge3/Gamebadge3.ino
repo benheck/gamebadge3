@@ -105,10 +105,10 @@ int cWF = 0xFF;						//Stands for chandelier which falling it's short so functio
 int currentFloor = 1;
 int currentCondo = 0;				//Which condo we've selected
 
-int doorTilePos[6] = { 16, 34, 52, 92, 110, 128 };
+int doorTilePos[6] = { 10, 28, 46, 86, 104, 122 };
 
 //0x80 = Apartment cleared 0x40 = Door open, ready to enter. If cleared number is changed to XX and can't be re-opened
-char apartmentState[7] = { 0, 0, 0, 0, 0, 0, 0 };	//Zero index not used, starts at 1 goes to 6
+char apartmentState[6] = { 0, 0, 0, 0, 0, 0 };	//Zero index not used, starts at 1 goes to 6
 
 bool elevatorOpen = false;
 
@@ -129,7 +129,7 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { titleScreen, titleScreen2, levelEdit, saveMap, loadMap, game, goHallway, goCondo, goJail, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { titleScreen, levelEdit, saveMap, loadMap, game, goHallway, goCondo, goJail, goElevator, pauseMode};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = titleScreen;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -144,9 +144,13 @@ uint8_t cursorX, cursorY, cursorAnimate;
 uint8_t soundTimer = 0;
 
 
-#define condoWidth	120  				//15 * 8
+#define condoWidth		120  				//15 * 8
+#define hallwayWidth 	136					//Lopsided, it's based on doors and dressers also symmetrical
 
-static uint16_t condoMap[15][condoWidth];
+//static uint16_t condoMap[15][condoWidth];
+static uint16_t condoMap[15][140];				//Condo is 120 tiles wide, hallway is 136 tiles wide so 140 covers both
+
+int mapWidth = hallwayWidth;					//The width of the currently loaded map. Sets where wraparound happens (like condoWidth)
 
 bool drawFine = false;		//Fine control for object drop on/off
 int drawXfine = 7 * 8;
@@ -169,6 +173,8 @@ int tilePlacePalette = 1;	//What palette dropping tiles use (0-3)
 
 int editWindowX = 0;		//The editing window position on the condo map
 
+bool editType = true;				//True = condo False = Hallway
+
 int currentCopyBuffer = 0;
 uint16_t copyBuffer[15][60];			//Edit buffer holds up to 4 screens (4 paste buffers)
 int copyBufferUL[4][2];				//The upper left corner of what we copied
@@ -189,7 +195,7 @@ int editMenuBaseY = 0;
 char message[15];					    //A message on bottom of edit screen?
 int messageTimer = 0;					//If above zero, dec per frame and erase menu once zero
 
-char mapFileName[20] = { 'l', 'e', 'v', 'e', 'l', 's', '/', 'c', 'o', 'n', 'd', 'o', '1', '_', '1', '.', 'm', 'a', 'p', 0 };	//levels/condoX_X.map + zero terminator
+char mapFileName[20] = { 'l', 'e', 'v', 'e', 'l', 's', '/', 'c', 'o', 'n', 'd', 'o', '1', '-', '1', '.', 'm', 'a', 'p', 0 };	//levels/condoX-X.map + zero terminator
 
 char fileNameFloor = '1';
 char fileNameCondo = '1';
@@ -219,12 +225,14 @@ bool eraseFlag = false;
 
 bool testAnimateState = false;
 
-int currentMap = 0;						//1 = hallway, 2 = condo
+enum mapNames { null, hallway, condo, elevator, boss, jail };		//What map we're in
+mapNames currentMap = null;
 
 int highestObjectIndex = 0;				//Counts up as a level loads. When running logic/collision checks, don't search past this
 
 int kittenTotal = 0;					//# of kittens per level
-int kittenCount = 0;					//How many player has recused
+int kittenCount = 0;					//How many player has recused per level
+int kittenCountLevel = 0;				//How many kittens per level (inc'd on condo exit)
 int kittenMessageTimer = 0;
 
 int budDeath = 0;						//If set, move Bud to center of screen then switch to KITTEN JAIL!!!
@@ -250,10 +258,24 @@ int budExitingWhat = 0;					//1 = condo door 2 = elevator
 
 bool budVisible = false;
 
+int frames = 0;							//Used to count seconds
 int seconds;							//How long it took to beat a floor
 int minutes;
 
 bool levelComplete = false;				//After each condo exit check all apt stats, if all = clear open elevator and set this true. Allows exit to next floor
+
+uint8_t xShake = 0;
+uint8_t yShake = 0;
+
+bool gameplayPaused = false;
+
+long score = 0;
+long propDamage = 0;
+int robotKill = 0;
+
+int bonusPhase = 0;
+int bonusTimer = 0;
+long levelBonus = 0;
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -290,7 +312,6 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		if (button(start_but)) {        //Button pressed?
 		  displayPause = false;
 		  Serial.println("LCD DMA UNPAUSED");
-		  switchGameTo(titleScreen);		//back to main menu
 		}    
 	}
 
@@ -529,7 +550,14 @@ void gameFrame() {
 				if (++currentFloor > 6) {
 					currentFloor = 1;
 				}
-			}			
+			}	
+
+			if (currentFloor & 1) {		//Odd? Edit does condo (default)
+				editType = true;	
+			}
+			else {
+				editType = false;		//Even? Edit does hallway
+			}
 			
 			tileDirect(cursorX, 8, (((currentFloor - 1) * 16) + 128) + 15);
 
@@ -594,7 +622,7 @@ void gameFrame() {
 		case goHallway:
 			if (isDrawn == false) {
 				setupHallway();
-				currentMap = 1;		//Hallway
+				currentMap = hallway;		//Hallway
 			}
 			hallwayLogic();
 			break;
@@ -602,14 +630,23 @@ void gameFrame() {
 		case goCondo:
 			if (isDrawn == false) {
 				setupCondo(currentFloor, currentCondo);
-				currentMap = 2;		//Condo
+				currentMap = condo;		//Condo
 			}
 			condoLogic();			
 			break;
+			
+		case goElevator:
+			if (isDrawn == false) {
+				setupElevator();
+				menuTimer = 100;
+			}
+			elevatorLogic();
+			break;		
 	
 		case goJail:
 			if (isDrawn == false) {
 				setupJail();
+				currentMap = jail;
 			}
 			jailLogic();
 			break;
@@ -717,19 +754,29 @@ void drawPauseMenu() {
 	
 }
 
+
+//Gameplay-----------------------------------------------
+
 void startGame() {
+
+	propDamage = 0;
+	robotKill = 0;
 
 	//currentFloor = 1;			//Setup game here
 	currentCondo = 0;			//Bud hasn't entered a condo
 	budLives = 9;
 	hallwayBudSpawn = 0;		//Bud jumps through glass
 
-	elevatorOpen = false;				//Level starting (if die in hallway, spawn in front of closed elevator)
+	elevatorOpen = false;		//Level starting (if die in hallway, spawn in front of closed elevator)
 	
 	stopWatchClear();
+	
+	for (int x = 0 ; x < 6 ; x++) {
+		apartmentState[x] = 0;
+	}
+	
 	switchGameTo(goHallway);
 
-	
 }
 
 void startNewFloor() {
@@ -751,7 +798,6 @@ void startNewFloor() {
 
 	
 }
-
 
 void setupJail() {
 
@@ -801,8 +847,11 @@ void jailLogic() {
 
 
 
+//Condo---------------------------------------------------
 
 void setupCondo(int whichFloor, int whichCondo) {
+	
+	mapWidth = condoWidth;
 	
 	stopAudio();
 	
@@ -916,7 +965,7 @@ void reloadCondo() {
 		drawCondoStrip(mapColumn, tileColumn);	//Draw vertical strip
 		++tileColumn &= 0x1F;					//Inc with binary rollover (32 wide)
 		
-		if (++mapColumn > 119) {				//Rollover (static as it's always a single inc no remainder)
+		if (++mapColumn == mapWidth) {				//Rollover (static as it's always a single inc no remainder)
 			mapColumn = 0;
 		}
 	}	
@@ -936,6 +985,44 @@ void drawCondoStrip(int condoStripX, int nameTableX) {
 	}	
 	
 }	
+
+void exitCondo() {
+	
+	stopAudio();
+	
+	apartmentState[currentCondo - 1] = 0xC0;	//Set apartment as door open + cleared
+	
+	hallwayBudSpawn = currentCondo;				//Bud spawns in front of the door
+	
+	budVisible = true;
+	budExitingWhat = 1;			//Exiting condo
+	budState = exiting;
+	budFrame = 0;
+	jump = 0;
+	
+	kittenMessageTimer = 0;				//Clear timer in case a message was on when Bud left
+	
+	kittenCountLevel += kittenCount;	//Condo cleared? Add how many kittens we recused to floor total
+	
+	int count = 0;
+	
+	for (int x = 0 ; x < 6 ; x++) {
+		if (apartmentState[x] & 0x80) {
+			count++;
+		}
+	}
+	
+	if (count == 6) {
+		levelComplete = true;
+		elevatorOpen = true;
+		kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
+	}
+	
+	//Add option so message is either "GOTO ELEVATOR" or "X CONDOS LEFT"
+
+	switchGameTo(goHallway);
+	
+}
 
 void condoLogic() {
 
@@ -984,6 +1071,7 @@ void condoLogic() {
 		}
 	}
 
+	drawBudStats();
 	budLogic2();
 
 	if (budState == dead) {
@@ -997,18 +1085,7 @@ void condoLogic() {
 		}
 	}
 	
-	drawSprite(4, 4, 0x01F8, 4, false, false);	//face
-	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
-	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
 
-	for (int x = 0 ; x < 3 ; x++) {
-		if (budPower > x) {
-			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
-		}
-		else {
-			drawSprite((x << 3) + 4, 14, 0x01FA, 4, false, false);
-		}			
-	}	
 
 
 	//drawSpriteDecimal(budStunned, 60, 0, 0);
@@ -1026,12 +1103,15 @@ void condoLogic() {
 	//Draw lives and power bar
 
 
-	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+	setWindow((xWindowCoarse << 3) | xWindowFine + xShake, yPos + yShake);			//Set scroll window
+
+	xShake = 0;
+	yShake = 0;
 
 	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level
 		
 		if (object[g].active) {
-			object[g].scan(worldX, 0);					//Draw object if active, plus logic (in object)
+			object[g].scan(worldX + xShake, 0 + yShake);					//Draw object if active, plus logic (in object)
 
 			if (object[g].state == 100) {				//Object hit floor?
 				playAudio("audio/glass_loose.wav");
@@ -1044,17 +1124,41 @@ void condoLogic() {
 				if (object[g].category == 0) {
 					if (object[g].type < 4) {				//Robot?
 						
-						if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true && budBlink == 0 && budStunned == 0) {	//Did it hit Bud?
-							budDamage();
-						}
-		
-						fallCheckRobot(g);			//See if any falling objects hit this robot
+						switch(object[g].state) {
 						
+							case 200:				//Short circuit
+							
+								break;
+								
+							case 201:
+								playAudio("audio/explode.wav");
+								object[g].state = 202;
+								object[g].animate = 0;
+								object[g].subAnimate = 0;
+								
+								object[g].xPos += ((object[g].width << 3) / 2) - 8;			//Center explosion on object
+								object[g].yPos += ((object[g].height << 3) / 2) - 8;
+								
+								object[g].category = 100;			//Explode!
+
+								break;
+								
+							default:
+								if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true && budBlink == 0 && budStunned == 0) {	//Did it hit Bud?
+									budDamage();
+								}
+				
+								fallCheckRobot(g);			//See if any falling objects hit this robot							
+								break;
+	
+						}
+
 					}	
 				
 					if (object[g].type == 4 && object[g].state == 0) {		//Un-rescued kitten?
 						
 						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
+							score += 50;
 							playAudio("audio/thankYou.wav");	
 							object[g].xPos += 4;			//Center rescuse kitten on sitting kitten
 							object[g].yPos -= 4;
@@ -1069,6 +1173,7 @@ void condoLogic() {
 					if (object[g].type == 5 && budPower < 3) {						//Greenie? Only run logic if Bud needs power (no pickup on full power)
 						
 						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
+							score += 100;
 							object[g].active = 0;
 							playAudio("audio/greenie.wav");
 							if (++budPower > 3) {
@@ -1079,11 +1184,24 @@ void condoLogic() {
 					}					
 				}
 
+				if (object[g].category == 100) {		//Is object exploding?
+					
+					xShake = random(0, 4);
+					yShake = random(0, 4);
+										
+					if (object[g].active == false) {
+						xShake = 0;
+						yShake = 0;
+					}
+				}
+
 				if (budState == swiping) {	//Bud can only swipe inert objects
 					
 					if (object[g].category > 0 && object[g].state == 0) {	//Bud can only swipe inert objects
 						
 						if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+							
+							propDamage++;							
 							
 							fallListAdd(g);							//Add this item to the fall list
 							
@@ -1097,6 +1215,8 @@ void condoLogic() {
 					if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {	//If bud hits a kitten...
 						
 						if (object[g].xSentryLeft == 0 && object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+							
+							score += 10;						//Score hack!
 							
 							object[g].xSentryLeft = 40;			//Cooldown for swat sounds
 							
@@ -1132,7 +1252,8 @@ void condoLogic() {
 				
 				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art by jumping through it
 					
-					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {						
+					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {		
+						propDamage++;
 						fallListAdd(g);							//Add this item to the fall list						
 						playAudio("audio/slap.wav");	
 						object[g].state = 99;					//Falling
@@ -1149,6 +1270,405 @@ void condoLogic() {
 
 	
 }
+
+
+//Hallway-------------------------------------
+
+void setupHallway() {
+
+	mapWidth = hallwayWidth;
+	
+	stopAudio();
+
+	loadPalette("hallway/hallway.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("hallway/hallway.nes", 0, 256);		//Load hallway tiles into page 0
+	
+	loadPattern("sprites/bud.nes", 256, 256);		//Load bud sprite tiles into page 1	
+	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
+	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots	
+	
+	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
+	setButtonDebounce(down_but, false, 0);
+	setButtonDebounce(left_but, false, 0);
+	setButtonDebounce(right_but, false, 0);
+	
+	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+	switch(hallwayBudSpawn) {
+	
+		case 0:				//Breaking glass stage 1
+			budSpawned = false;
+			budSpawnTimer = 0;
+			spawnIntoHallway(0, 5, 40);
+			break;
+					
+		case 10:			//Emerge from elevator (stage 2-6)
+			budSpawned = true;
+			budDir = false;		
+			elevatorOpen = false;
+			budState = exiting;
+			budExitingWhat = 2;			//exiting elevator
+			budFrame = 0;
+			budVisible = false;
+			jump = 0;
+			spawnIntoHallway(60, 7, 104);
+			break;
+			
+		default:			//Emerge from cleared condo
+			budSpawned = true;
+			budDir = false;		
+			spawnIntoHallway(doorTilePos[currentCondo - 1] - 6, 7, 104);		
+			break;
+	
+	}
+	
+	levelComplete = false;
+
+	fileNameFloor = '1';		//Hallway hub is floor 1, condo 0
+	fileNameCondo = '0';
+	updateMapFileName();
+	loadLevel();								//Load hallway level tiles, we will populate objects and redraw doors manually
+
+	entryWindow = thingAdd(hallWindow, 32, 48);			//Get the index for this one
+	
+	if (currentCondo > 0) {							//Bud has already been in a condo?
+		if (currentFloor == 1) {
+			thing[entryWindow].state = 1;				//Window was already broken
+		}
+		else {
+			thing[entryWindow].state = 0;				//Broken window only on first floor			
+		}
+		
+	}
+	else {
+		thing[entryWindow].state = 0;				//Intact window, will be broken
+	}
+
+	thingAdd(hallWindow, 1023, 48);						//Other window
+	
+	thingAdd(chandelier, 152, 0);
+	thingAdd(chandelier, 296, 0);	
+	thingAdd(chandelier, 440, 0);
+	thingAdd(chandelier, 616, 0);
+	thingAdd(chandelier, 760, 0);
+	thingAdd(chandelier, 904, 0);
+
+	populateEditDoors();			//Redraw stuff that changes (door #'s, door open close, etc)
+	drawHallwayElevator(64);
+
+	reloadCondo();					//Reload what's visible
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
+	
+}
+
+void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
+
+	budFrame = 0;
+	budSubFrame = 0;
+	budDir = false;											//True = going left
+
+	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
+	budY = budStartFineY;
+	
+	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
+	budWorldY = budStartFineY;
+	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
+
+	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
+	worldY = 0;
+
+	xWindowFine = 0;										//The fine scrolling amount
+	xWindowCoarse = windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
+	xWindowBudToTile = (xWindowCoarse + (budStartCoarseX + 1)) & 0x1F;		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
+		
+	xStripLeft = xWindowCoarse - budStartCoarseX;	//6				//Set the left draw edge in the tilemap
+	
+	if (xStripLeft < 0) {							//Handle negative rollover
+		xStripLeft += 32;
+	}
+	
+	xStripRight = ((xStripLeft + 26) & 0x1F);		//Compute right edge
+	
+	xLevelStripLeft = windowStartCoarseX - budStartCoarseX;		//Strip redraw position on left (when moving left)
+	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
+	xLevelStripRight = xLevelStripLeft + 26;	//6	//Strip redraw position on right (when moving right)
+
+}
+
+void hallwayLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
+
+	stopWatchTick();
+
+	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
+		if (kittenMessageTimer > 0) {
+			if (kittenMessageTimer & 0x04) {
+				drawSpriteText("GOTO ELEVATOR", 8, 56, 3);
+			}	
+			kittenMessageTimer--;
+		}
+	}
+
+	drawBudStats();
+
+	if (budSpawned == true) {
+		budLogic2();
+	}
+	else {
+		if (++budSpawnTimer == 20) {
+			budSpawned = true;
+			jump = 6;
+			velocikitten = 5;
+			thingAdd(hallGlass, 32, 48);			//Spawn broken glass
+			thing[entryWindow].state = 1;			//Break the existing window
+			playAudio("audio/glass_2.wav");
+		}
+	}
+
+	thingLogic();
+	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+	moveJump = false;
+
+	// drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
+	// drawSpriteDecimal(xWindowBudToTile, 10, 8, 0);		
+	// drawSpriteDecimal(budWorldX, 10, 16, 0);
+	// drawSpriteDecimal(budWorldY, 10, 24, 0);	
+	
+
+	
+	// drawSpriteDecimal(budX, 8, 0, 0);		
+	// drawSpriteDecimal(xWindowBudFine, 8, 8, 0);	
+	// drawSpriteDecimal(xWindowBudToTile, 8, 16, 0);
+	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
+
+
+}
+
+
+
+//Elevator (stage complete)-----------------------------------------------
+
+void setupElevator() {
+	
+	stopAudio();
+	
+	clearObjects();
+
+	loadPalette("condo/condo.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles
+	// loadPattern("sprites/bud.nes", 256, 256);		//Load bud sprite tiles into page 1	
+	// loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
+	// loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots
+
+	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
+	setButtonDebounce(down_but, false, 0);
+	setButtonDebounce(left_but, false, 0);
+	setButtonDebounce(right_but, false, 0);
+	
+	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+	setWindow(0, 0);
+
+	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
+
+	kittenCountLevel = 30;
+	
+	robotKill = 20;
+	
+	propDamage = 10;
+
+
+	bonusPhase = 1;
+	bonusTimer = 0;
+	menuTimer = 0;
+
+	seconds = 48;
+	minutes = 1;
+
+	isDrawn = true;	
+	displayPause = false;
+
+	
+}
+
+void elevatorLogic() {
+
+	// if (menuTimer > 0) {
+		// if (--menuTimer > 0) {
+			// return;
+		// }
+	// }
+
+	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
+
+	switch(bonusPhase) {
+	
+		case 1:
+			drawText(" KITTENS SAVED", 0, 2, false);
+			drawDecimal(kittenCountLevel, 6, 3);
+
+			if (++bonusTimer > 1) {
+				pwm_set_freq_duty(6, 520, 25);
+				bonusTimer = 0;
+				if (kittenCountLevel < 1) {
+					playAudio("audio/cash.wav");
+					menuTimer = 40;
+					bonusPhase = 2;
+				}
+				else {
+					kittenCountLevel--;
+					levelBonus += 2000;				
+				}
+			}
+			else {
+				pwm_set_freq_duty(6, 0, 0);	
+			}
+		break;	
+	
+	
+		case 2:
+			drawText("ROBOTS  SMASHED", 0, 2, false);
+			drawDecimal(robotKill, 6, 3);
+
+			if (++bonusTimer > 1) {
+				pwm_set_freq_duty(6, 520, 25);
+				bonusTimer = 0;
+				if (robotKill < 1) {
+					playAudio("audio/cash.wav");
+					menuTimer = 40;
+					bonusPhase = 3;
+				}
+				else {
+					robotKill--;
+					levelBonus += 500;					
+				}
+			}
+			else {
+				pwm_set_freq_duty(6, 0, 0);	
+			}
+		break;
+
+		case 3:
+			drawText("PROPERTY DAMAGE", 0, 2, false);
+			drawDecimal(propDamage, 6, 3);
+			
+			if (++bonusTimer > 1) {
+				pwm_set_freq_duty(6, 520, 25);
+				bonusTimer = 0;
+				if (propDamage < 1) {
+					playAudio("audio/cash.wav");
+					menuTimer = 40;
+					bonusPhase = 4;
+				}	
+				else {
+					propDamage--;			
+					levelBonus += 100;					
+				}
+			}
+			else {
+				pwm_set_freq_duty(6, 0, 0);	
+			}			
+		break;
+		
+		case 4:
+			drawText("  TIME BONUS   ", 0, 2, false);
+			drawText("00", 5, 3, false);
+			
+			if (minutes > 9) {
+				drawDecimal(minutes, 5, 3);
+			}
+			else {
+				drawDecimal(minutes, 6, 3);
+			}
+			
+			drawText(":0", 6, 3, false);
+			
+			if (seconds > 9) {
+				drawDecimal(seconds, 8, 3);
+			}
+			else {
+				drawDecimal(seconds, 9, 3);
+			}
+			
+			if (seconds & 1) {
+				pwm_set_freq_duty(6, 520, 25);
+			}
+			else {
+				pwm_set_freq_duty(6, 0, 0);
+			}
+
+			seconds--;
+			levelBonus += 5;
+			if (seconds < 0) {
+				seconds = 59;
+				if (--minutes < 0) {
+					playAudio("audio/cash.wav");
+					bonusPhase = 5;
+					score += levelBonus;
+					levelBonus = 0;
+					menuTimer = 50;
+				}
+			}
+		break;
+		
+		case 5:
+			pwm_set_freq_duty(6, 0, 0);
+			if (--menuTimer < 1) {
+				nextFloor();
+			}		
+		break;		
+		
+		
+	}
+	
+	drawText("               ", 0, 7, false);
+	drawText("  LEVEL BONUS", 0, 6, false);
+	drawDecimal(levelBonus, 5, 7);	
+	
+	drawText("     SCORE", 0, 9, false);
+	drawDecimal(score, 5, 10);	
+	
+	
+}
+
+
+
+void nextFloor() {
+
+	if (++currentFloor == 7) {
+		//goto boss
+	}
+	
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		apartmentState[x] = 0;
+	}
+	
+	currentCondo = 0;			//Bud hasn't entered a condo
+
+	hallwayBudSpawn = 10;		//Bud from elevator
+
+	stopWatchClear();
+	switchGameTo(goHallway);
+	
+}
+
+void drawBudStats() {
+
+	drawSprite(4, 4, 0x01F8, 4, false, false);	//face
+	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
+	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
+
+	for (int x = 0 ; x < 3 ; x++) {
+		if (budPower > x) {
+			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
+		}
+		else {
+			drawSprite((x << 3) + 4, 14, 0x01FA, 4, false, false);
+		}			
+	}		
+	
+}	
 
 void budDamage() {
 
@@ -1232,10 +1752,11 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 		
 			if (object[g].animate == 8) {			//Object must be falling max speed to kill a robot
 				if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
-					
+					playAudio("audio/glass_1.wav");	//Just the start of this (probably mix with object smash)
 					fallingObjectState[x] = false;		//Remove it from fall list
 					object[g].active = false;			//Destory falling object				
-					object[index].active = false;		//Blow up robot
+					object[index].state = 200;			//Short circuit then blow up robot
+					object[index].animate = 0;
 				}			
 			}
 	
@@ -1243,7 +1764,6 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 	}	
 	
 }
-
 
 void movingObjects(bool state) {
 	
@@ -1258,12 +1778,6 @@ void movingObjects(bool state) {
 
 
 
-void spawnIntoCondo(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
-
-
-	
-	
-}
 
 
 void budLogic2() {
@@ -1338,7 +1852,7 @@ void budLogic2() {
 		return;
 	}
 
-	budPalette = 4;						//Default bud palette
+	budPalette = 4;						//Default bud palette. Change be changed to white to make him invinci-blink
 	
 	if (budBlink > 0) {
 		if (budBlink > 15) {
@@ -1354,10 +1868,8 @@ void budLogic2() {
 		budBlink--;						//Dec the invinc time		
 	}
 	
-	
-
 	int jumpGFXoffset = 6;						//Jumping up	
-	
+	bool moveSuppress = false;					//Default states changed by Bud action
 	bool budNoMove = true;
 
 	switch(budState) {
@@ -1462,12 +1974,12 @@ void budLogic2() {
 			if (budDir == true) {			//Left
 				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
 				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-				setBudAttackBox(budWorldX - 16, budWorldY - 8, budWorldX, budWorldY);
+				setBudAttackBox(budWorldX - 16, budWorldY - 12, budWorldX, budWorldY);
 			}
 			else {							//Right
 				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
 				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-				setBudAttackBox(budWorldX + 16, budWorldY - 8, budWorldX + 32, budWorldY);
+				setBudAttackBox(budWorldX + 16, budWorldY - 12, budWorldX + 32, budWorldY);
 			}	
 			break;
 
@@ -1493,718 +2005,55 @@ void budLogic2() {
 			}			
 			break;
 
-		case entering:
-			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, budPalette, budDir, false);
-		
-			if (animateBud) {
-				if (budFrame & 0x02) {
-					budDir = false;
-				}					
-				else {
-					budDir = true;
-				}
-				if (++budFrame > 15) {
-					budFrame = 0;
-					switchGameTo(goCondo);
-				}
-			}		
-		
-			break;
-
-	}
-
-	if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't? Must be rising still
-		if (++jump < 12) {				//Jump up with decreasing velocity	
-			budY -= velocikitten;
-			budWorldY -= velocikitten;
-			if (velocikitten > 1) {				
-				velocikitten--;
-			}
-		}
-		else {							//Hit top? Set falling and reset velocity
-			jump = 128;
-			velocikitten = 2;
-		}
-		
-	}
-	
-	if (jump == 0 || jump == 128) {		//Walked off a ledge or coming down from a jump?
-	
-		bool fallEdge = false;
-		
-		
-		if (budY > -1) {				//Only do checks with Bud on screen (else tile data is bad)
-			if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
-				fallEdge = true;
-			}			
-		}
-		else {
-			fallEdge = true;
-		}
-	
-		if (fallEdge == true) {			//Nothing below?
-		
-			if (jump == 0) {			//Weren't already falling?
-				velocikitten = 2;		//Means we walked off a ledge, reset velocity
-				jump = 128;				//Set falling state
-				//budState = jumping;
-			}
-
-			budY += velocikitten;					//Fall
-			budWorldY += velocikitten;
-			if (velocikitten < 8) {
-				velocikitten++;
-			}
-		}
-		else {
-			if (jump == 128) {				//Were we falling? Clear flag
-				jump = 0;					//Something below? Clear jump flag
-				budY &= 0xF8;
-				budWorldY &= 0xF8;
-				
-				if (budStunned == 0) {		//If falling while stunned, don't reset state (stun timeout will)
-					budState = rest;
-				}	
-			}		
-		}
-	
-	}
-
-	if (button(C_but)) {
-		if (jump == 0) {
-			jump = 1;
-			velocikitten = 9;
-			budNoMove = false;
-			//budState = jumping;	
-		}
-		
-	}
-
-	if (budSwipe < 99 && animateBud == true) {
-		if (++budSwipe > 2) {
-			budSwipe = 99;
-			budState = rest;
-		}
-	}
-
-	if (button(B_but) && jump == 0) {		//Can't swipe while jumping
-	
-		if (budSwipe == 99) {
-			budSwipe = 0;	
-			budState = swiping;
-		}
-		
-		thingAdd(bigRobot, 100, 64);
-	
-	}
-
-	
-	if (button(left_but)) {
-		budDir = true;
-	
-		switch(budState) {
-		
-			case rest:
-				budState = moving;
-				budFrame = 0;
-				break;
-				
-			case moving:
-				budDir = true;
-				//bud moves xPos change
-				break;	
-				
-			case jumping:
-				moveJump = true;
-				budDir = true;
-				//bud moves xPos change
-				break;				
-
-			case stopping:
-				budState = moving;
-				break;
-	
-		}
-		budNoMove = false;
-		
-	}
-	
-	if (button(right_but)) {
-		budDir = false;
-		
-		switch(budState) {
-		
-			case rest:
-				budState = moving;
-				budFrame = 0;
-				break;
-				
-			case moving:
-				budDir = false;
-				//bud moves xPos change
-				break;
-
-			case jumping:
-				moveJump = true;
-				budDir = false;
-				//bud moves xPos change
-				break;					
-
-			case stopping:
-				budState = moving;
-				break;
-	
-		}
-		budNoMove = false;
-
-	}
-	
-
-	if (budNoMove == true && budState == moving) {		//Was Bud moving, but then d-pad released? Bud comes to a stop
-		budState = rest;
-		budFrame = 0;
-	}
-		
-	if (currentMap == 1) {					//In the hallway?
-		
-		int temp = checkDoors();			//See if Bud is standing in front of a door
-		
-		if (temp > -1 && budState != entering) {					//He is? tempCheck contains a index # of which one (0-5)
-			
-			if ((apartmentState[temp] & 0xC0) == 0x00) {	//If apartment cleared or door already open bits set, no action can be taken
-
-				if (button(up_but)) {
-					apartmentState[temp] |= 0x40;								//Set the door open bit
-					playAudio("audio/doorOpen.wav");
-					populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
-					redrawCurrentHallway();
-					budState = entering;
-					budFrame = 0;	
-					currentCondo = temp + 1;
-				}
-				
-				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
-				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
-				
-				if (++inArrowFrame > 7) {
-					inArrowFrame = 0;
-				}
-		
-			}
-			
-		}
-
-		if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
-			
-			if (elevatorOpen == true) {							//Ready for the next level?
-
-				if (button(up_but)) {
-					playAudio("audio/elevDing.wav");
-					budState = entering;
-					budFrame = 0;				
-				}
-				
-				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
-				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
-				
-				if (++inArrowFrame > 7) {
-					inArrowFrame = 0;
-				}
-		
-			}
-			
-		}
-	
-	}
-	
-	// if (button(B_but)) {
-		// thingAdd(bigRobot, 100, 64);
-		// //playAudio("audio/getread.wav");
-		// //playAudio("audio/back.wav");
-		// //drawText("supercalifraguliosdosis", 0, 14, true);
-		// //pwm_set_freq_duty(6, 261, 25);
-		// //pwm_set_freq_duty(8, 277, 50);
-	// }	
-	
-	if (button(A_but)) {
-		playAudio("audio/hitModem.wav");
-	}		
-	
-	
-}
-
-bool budMoveLeftC(int speed) {
-
-	if (budY > -1) {		//Tile obstacle check first
-		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
-			return false;
-		}		
-	}
-
-	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
-		
-		budX -= speed;
-		budWorldX -= speed;
-		xWindowBudFine -= speed;
-		
-		if (xWindowBudFine < 0) {				//Passed tile boundary?
-			xWindowBudFine += 8;			//Reset fine bud screen scroll
-			
-			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		}	
-
-		if (budX < 8) {
-			if (true) { //kittenCount == kittenTotal) {
-				exitCondo();
-			}
-			else {
-				if (kittenMessageTimer == 0) {
-					kittenMessageTimer = 60;	
-					playAudio("audio/taunt.wav");
-				}
-			}
-		}
-	}
-	
-	return true;
-}
-
-bool budMoveRightC(int speed) {
-
-	if (budY > -1) {							//Tile obstacle check first
-		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
-			return false;
-		}		
-	}
-
-	if (condoMoveRight(speed) == false) {		//Can window NOT scroll right?
-		budX += speed;
-		budWorldX += speed;
-		xWindowBudFine += speed;
-		
-		if (xWindowBudFine > 7) {				//Passed tile boundary?
-			xWindowBudFine -= 8;			//Reset fine bud screen scroll
-			
-			xWindowBudToTile = windowCheckRight(xWindowBudToTile);
-		}			
-	}
-	
-	return true;
-}
-
-bool condoMoveLeft(int theSpeed) {
-
-	if (budX > 48) {
-		return false;
-	}
-	
-	xWindowFine -= theSpeed;				//Move fine scroll		
-	
-	budWorldX -= theSpeed;
-	worldX -= theSpeed;
-	
-	if (xWindowFine < 0) {				//Passed tile boundary?
-	
-		if (xLevelCoarse == 0) {		//At left edge?
-			xWindowFine = 0;			//Clear out fine register, we can't go further left
-			worldX += theSpeed;
-			budWorldX += theSpeed;
-			return false;				//Bud can now move past his scroll edge
-		}
-
-		xWindowFine += 8;				//Subtract fine		
-		
-		xWindowCoarse = windowCheckLeft(xWindowCoarse);
-		xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		xStripLeft = windowCheckLeft(xStripLeft);
-		xStripRight = windowCheckLeft(xStripRight);
-
-		xLevelStripLeft--;
-		
-		if (xLevelStripLeft < 0) {
-			xLevelStripLeft += 120;
-		}
-		
-		xLevelCoarse--;
-		
-		xLevelStripRight--;		
-		
-		if (xLevelStripRight < 0) {
-			xLevelStripRight += 120;
-		}
-
-		xStripDrawing = xStripLeft;			//Where to draw new tiles on tilemap
-		
-		drawCondoStrip(xLevelStripLeft, xStripLeft);
-
-	}	
-	
-	return true;
-		
-}
-
-bool condoMoveRight(int theSpeed) {
-	
-	if (budX < 56) {
-		return false;
-	}
-	
-	budWorldX += theSpeed;
-	xWindowFine += theSpeed;				//Move fine scroll		
-	
-	worldX += theSpeed;	
-	
-	if (xWindowFine > 7) {				//Passed tile boundary?
-	
-		if (xLevelCoarse == 104) {		//At right edge?
-			xWindowFine = 7;			//Max out fine register, we can't go further right
-			worldX -= theSpeed;
-			budWorldX -= theSpeed;
-			return false;				//Bud can now move past his scroll edge
-		}
-	
-		xWindowFine -= 8;				//Subtract fine		
-		
-		xWindowCoarse = windowCheckRight(xWindowCoarse);
-		xWindowBudToTile = windowCheckRight(xWindowBudToTile);
-		xStripLeft = windowCheckRight(xStripLeft);
-		xStripRight = windowCheckRight(xStripRight);
-
-		xLevelStripLeft++;
-		
-		if (xLevelStripLeft > 119) {
-			xLevelStripLeft -= 120;
-		}
-		
-		xLevelCoarse++;
-		
-		xLevelStripRight++;		
-		
-		if (xLevelStripRight > 119) {
-			xLevelStripRight -= 120;
-		}
-
-		xStripDrawing = xStripRight;			//Where to draw new tiles on tilemap
-		
-		drawCondoStrip(xLevelStripRight, xStripRight);		
-
-	}
-
-	return true;
-	
-}
-
-void exitCondo() {
-	
-	stopAudio();
-	
-	apartmentState[currentCondo - 1] = 0xC0;	//Set apartment as door open + cleared
-	
-	hallwayBudSpawn = currentCondo;				//Bud spawns in front of the door
-	
-	budVisible = true;
-	budExitingWhat = 1;			//Exiting condo
-	budState = exiting;
-	budFrame = 0;
-	jump = 0;
-	
-	kittenMessageTimer = 0;				//Clear timer in case a message was on when Bud left
-	
-	int count = 0;
-	
-	for (int x = 0 ; x < 6 ; x++) {
-		if (apartmentState[x] & 0x80) {
-			count++;
-		}
-	}
-	
-	if (count == 6) {
-		levelComplete = true;
-		elevatorOpen = true;
-		kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
-	}
-	
-	//Add option so message is either "GOTO ELEVATOR" or "X CONDOS LEFT"
-
-	switchGameTo(goHallway);
-	
-}
-
-
-void stopWatchTick() {
-
-	if (++seconds == 60) {
-		seconds = 0;
-		++minutes;
-	}
-	
-}
-
-void stopWatchClear() {
-
-	seconds = 0;
-	minutes = 0;
-	
-}
-
-void hallwayLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
-
-	stopWatchTick();
-
-	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
-		if (kittenMessageTimer > 0) {
-			if (kittenMessageTimer & 0x04) {
-				drawSpriteText("GOTO ELEVATOR", 8, 56, 3);
-			}	
-			kittenMessageTimer--;
-		}
-	}
-
-	if (budSpawned == true) {
-		budLogic();
-	}
-	else {
-		if (++budSpawnTimer == 20) {
-			budSpawned = true;
-			jump = 6;
-			velocikitten = 5;
-			thingAdd(hallGlass, 80, 48);			//Spawn broken glass
-			thing[entryWindow].state = 1;			//Break the existing window
-			playAudio("audio/glass_2.wav");
-		}
-	}
-		
-	thingLogic();
-	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
-	moveJump = false;
-	
-	if (button(select_but)) {
-
-	  pwm_set_freq_duty(6, 0, 0);	  
-	  pwm_set_freq_duty(8, 0, 0);
-	  pwm_set_freq_duty(10, 0, 0);
-	  pwm_set_freq_duty(12, 0, 0);
-	  fillTiles(0, 0, 31, 31, ' ', 0);
-	  
-	}
-
-	if (dutyOut > 0) {
-		pwm_set_freq_duty(12, 100 - dutyOut, 50);
-		dutyOut -= 10;
-		if (dutyOut < 1) {
-			dutyOut = 0;
-			pwm_set_freq_duty(12, 0, 0);
-		}
-		
-	}
-	
-
-	// drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
-	// drawSpriteDecimal(xWindowBudToTile, 10, 8, 0);		
-	// drawSpriteDecimal(budWorldX, 10, 16, 0);
-	// drawSpriteDecimal(budWorldY, 10, 24, 0);	
-	
-
-	
-	// drawSpriteDecimal(budX, 8, 0, 0);		
-	// drawSpriteDecimal(xWindowBudFine, 8, 8, 0);	
-	// drawSpriteDecimal(xWindowBudToTile, 8, 16, 0);
-	// drawSpriteDecimal(xLevelStripRight, 8, 48, 0);		
-
-
-}
-
-void budLogic() {
-
-	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
-	
-	if (++budSubFrame > 1) {
-		budSubFrame = 0;
-		animateBud = true;				//Set animate flag. Bud still moves/does logic on ones
-	}		
-
-	int jumpGFXoffset = 6;						//Jumping up	
-	
-	bool budNoMove = true;
-	
-	//drawSprite(budX, budY, 0x9F, 4, false, false);
-
-	bool moveSuppress = false;
-
-	switch(budState) {
-	
-		case rest:								//Rest = not moving left or right. Can still be jumping or falling
-			if (jump > 0) {
-				int offset = 6;					//Jumping up gfx (default)
-				
-				if (jump == 128) {
-					offset = 8;					//Falling down gfx
-				}			
-				if (budDir == false) {														//Falling facing right	
-					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
-					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
-				}
-				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
-					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-				}				
-			}
-			else {
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);			//2x2 tile hit box (his ears don't count)
-	
-				if (budDir == false) {			//Right
-					drawSprite(budX, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-					drawSprite(budX + 8, budY, 7, 18, 4, budDir, false);		//Front feet
-					drawSprite(budX, budY - 8, 6, 17, 4, budDir, false);		//Back
-					
-					if (blink < 35) {
-						drawSprite(budX + 8, budY - 8, 7, 17, 4, budDir, false);
-					}
-					else {
-						drawSprite(budX + 8, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
-					}
-
-					drawSprite(budX + 8, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
-					
-				}
-				else {							//Left
-					drawSprite(budX + 8, budY, 0 + tail, 31, 4, budDir, false);		//Draw animated tail on fours		
-					drawSprite(budX, budY, 7, 18, 4, budDir, false);		//Front feet
-					drawSprite(budX + 8, budY - 8, 6, 17, 4, budDir, false);		//Back
-					
-					if (blink < 35) {
-						drawSprite(budX, budY - 8, 7, 17, 4, budDir, false);
-					}
-					else {
-						drawSprite(budX, budY - 8, 6, 16, 4, budDir, false);	//Blinking Bud!
-					}
-
-					drawSprite(budX, budY - 16, 7, 16, 4, budDir, false);	//Ear tips					
-				}	
-				if (animateBud) {
-					if (++tail > 2) {
-						tail = 0;
-					}
-					if (++blink > 40) {
-						blink = 0;
-					}
-				}				
-			}
-			break;
-		
-		case moving:
-			if (jump > 0) {						//If jumping while moving use the jump stills
-				int offset = 6;					//Jumping up gfx (default)
-				if (jump == 128) {
-					offset = 8;					//Falling down gfx
-				}	
-				if (budDir == false) {														//Falling facing right	
-					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);
-					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
-					budMoveRight(3);
-				}
-				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, 4, budDir, false);	//Falling facing left
-					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-					budMoveLeft(3);
-				}		
-			}
-			else {										//Running on ground animation
-	
-				if (budDir == false) {		
-					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
-					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
-					budMoveRight(3);		
-				}
-				else {				
-					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, 4, budDir, false);	//Running
-					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
-					budMoveLeft(3);		
-				}
-				if (animateBud) {
-					if (++budFrame > 6) {
-						budFrame = 0;
-					}					
-				}		
-			}
-			break;	
-
-		case swiping:
-			if (budDir == true) {
-				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
-				setBudHitBox(budWorldX - 16, budWorldY - 16, budWorldX + 16, budWorldY + 8);
-			}
-			else {
-				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, 4, budDir, false);
-				setBudHitBox(budWorldX, budWorldY - 16, budWorldX + 32, budWorldY + 8);
-			}	
-			break;
-
-		case exiting:
-		
-			moveSuppress = true;
-		
+		case exiting:		
+			moveSuppress = true;		
 			if (budVisible == true) {
 				drawSprite(budX + 4, budY - 8, 7, 16 + 5, 1, 2, 4, budDir, false);	
-			}	
-		
+			}			
 			if (animateBud) {
 				if (budFrame & 0x02) {
 					budDir = false;
 				}					
 				else {
 					budDir = true;
-				}
-				
-				if (budExitingWhat == 1) {									//Exiting a condo?
-				
+				}				
+				if (budExitingWhat == 1) {									//Exiting a condo?			
 					if (++budFrame > 10) {
 						budFrame = 0;
 						budState = rest;
 						budDir = false;
-						
 						apartmentState[currentCondo - 1] = 0x80;				//Set door closed, apt clear
 						playAudio("audio/doorOpen.wav");
-						populateDoor(doorTilePos[currentCondo - 1], currentCondo, false);		//CLOSE THE DOOR ALEX THERE'S A DRAFT!				
-						redrawCurrentHallway();	
-
-						//switchGameTo(goCondo);
-					}				
-						
+						drawHallwayDoorClosed(doorTilePos[currentCondo - 1], currentCondo);
+						//populateDoor(doorTilePos[currentCondo - 1], currentCondo, false);		//CLOSE THE DOOR ALEX THERE'S A DRAFT!				
+						reloadCondo();
+						//redrawCurrentHallway();	
+					}										
 				}
-				else {
-					
-					budFrame++;
-					
+				else {					
+					budFrame++;					
 					if (budFrame == 5) {
 						budVisible = true;					//He's visible once the doors open
 						playAudio("audio/elevDing.wav");
 						elevatorOpen = true;				//Doors open, 10 frames on 2's open
-						redrawCurrentHallway();						
-					}
-									
+						drawHallwayElevator(64);
+						reloadCondo();					
+					}									
 					if (budFrame == 15) {					//then close, now Bud can move
 						budFrame = 0;
 						budState = rest;
 						budDir = false;
-						elevatorOpen = false;							
-						redrawCurrentHallway();	
+						elevatorOpen = false;	
+						drawHallwayElevator(64);						
+						reloadCondo();	
 					}					
-
 				}				
-				
-				
-
-			}		
-		
+			}			
 			break;
 	
-		case entering:
-		
-			moveSuppress = true;
-		
-			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);
-		
+		case entering:		
+			moveSuppress = true;		
+			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);		
 			if (animateBud) {
 				if (budFrame & 0x02) {
 					budDir = false;
@@ -2214,20 +2063,21 @@ void budLogic() {
 				}
 				if (++budFrame > 15) {
 					budFrame = 0;
-					switchGameTo(goCondo);
+					if (levelComplete == true) {
+						switchGameTo(goElevator);
+					}
+					else {
+						switchGameTo(goCondo);
+					}					
 				}
-			}		
-		
+			}				
 			break;
 
 	}
 
-
-	//SUPPRESS MOVE on ENTER EXIT / WINDOW
-
-	if (moveSuppress == false) {
-
-		if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't?
+	if (moveSuppress == false) {			//If Bud isn't frozen (enter/exit/dead) then player can move him
+		
+		if (jump & 0x7F) {					//Jump is set, but the MSB (falling) isn't? Must be rising still
 			if (++jump < 12) {				//Jump up with decreasing velocity	
 				budY -= velocikitten;
 				budWorldY -= velocikitten;
@@ -2246,18 +2096,15 @@ void budLogic() {
 		
 			bool fallEdge = false;
 			
-			//if (budDir == true) {			//Facing left?
+			
+			if (budY > -1) {				//Only do checks with Bud on screen (else tile data is bad)
 				if (getTileType(budTileCheck(0), (budY >> 3)) == 0 && getTileType(budTileCheck(1), (budY >> 3)) == 0) {	//Nothing below?
 					fallEdge = true;
-				}
-			// }
-			// else {							//Facing right
-				// if (getTileType(budTileCheck(-1), (budY >> 3)) == 0 && getTileType(budTileCheck(0), (budY >> 3)) == 0) {	//Nothing below?
-					// fallEdge = true;
-				// }			
-			// }
-		
-		
+				}			
+			}
+			else {
+				fallEdge = true;			//Bud is above top of screen so must be falling
+			}
 		
 			if (fallEdge == true) {			//Nothing below?
 			
@@ -2269,7 +2116,7 @@ void budLogic() {
 
 				budY += velocikitten;					//Fall
 				budWorldY += velocikitten;
-				if (velocikitten < 8) {
+				if (velocikitten < 7) {
 					velocikitten++;
 				}
 			}
@@ -2278,19 +2125,16 @@ void budLogic() {
 					jump = 0;					//Something below? Clear jump flag
 					budY &= 0xF8;
 					budWorldY &= 0xF8;
-					budState = rest;
+					
+					if (budStunned == 0) {		//If falling while stunned, don't reset state (stun timeout will)
+						budState = rest;
+					}	
 				}		
 			}
 		
 		}
 
-		
 		if (button(C_but)) {
-			//playAudio("audio/back.wav");
-			//drawText("and it's been the ruin of many of a young boy. And god, I know, I'm one...", 0, 12, true);
-			//dutyOut = 50;
-			//pwm_set_freq_duty(12, 493, 25);
-			
 			if (jump == 0) {
 				jump = 1;
 				velocikitten = 9;
@@ -2314,10 +2158,9 @@ void budLogic() {
 				budState = swiping;
 			}
 			
-			thingAdd(bigRobot, 100, 64);
+			//thingAdd(bigRobot, 100, 64);
 		
 		}
-
 		
 		if (button(left_but)) {
 			budDir = true;
@@ -2378,196 +2221,94 @@ void budLogic() {
 			budNoMove = false;
 
 		}
-				
+
+		if (button(A_but)) {
+			//playAudio("audio/hitModem.wav");
+			levelComplete = true;
+			elevatorOpen = true;
+			drawHallwayElevator(64);
+			reloadCondo();
+			kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
 		
+			//kittenCount = kittenTotal;
+		}	
+			
 	}
-
-
-
-
 
 	if (budNoMove == true && budState == moving) {		//Was Bud moving, but then d-pad released? Bud comes to a stop
 		budState = rest;
 		budFrame = 0;
 	}
 		
-
-	int temp = checkDoors();			//See if Bud is standing in front of a door
-	
-	if (temp > -1 && budState != entering) {					//He is? tempCheck contains a index # of which one (0-5)
+	if (currentMap == hallway) {					//In the hallway? See if Bud can enter a door or elevator
 		
-		if ((apartmentState[temp] & 0xC0) == 0x00) {	//If apartment cleared or door already open bits set, no action can be taken
+		int temp = checkDoors();			//See if Bud is standing in front of a door
+		
+		if (temp > -1 && budState != entering) {					//He is? tempCheck contains a index # of which one (0-5)
+			
+			if ((apartmentState[temp] & 0xC0) == 0x00) {	//If apartment cleared or door already open bits set, no action can be taken
 
-			if (button(up_but)) {
-				apartmentState[temp] |= 0x40;								//Set the door open bit
-				playAudio("audio/doorOpen.wav");
-				populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
-				redrawCurrentHallway();
-				budState = entering;
-				budFrame = 0;	
-				currentCondo = temp + 1;
+				if (button(up_but)) {
+					apartmentState[temp] |= 0x40;								//Set the door open bit
+					playAudio("audio/doorOpen.wav");
+					drawHallwayDoorOpen(doorTilePos[temp], 0);
+					//populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
+					reloadCondo();
+					//redrawCurrentHallway();
+					budState = entering;
+					budFrame = 0;	
+					currentCondo = temp + 1;
+				}
+				
+				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+				
+				if (++inArrowFrame > 7) {
+					inArrowFrame = 0;
+				}
+		
 			}
 			
-			drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
-			drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
-			
-			if (++inArrowFrame > 7) {
-				inArrowFrame = 0;
-			}
-	
 		}
-		
-	}
 
-	if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
-		
-		if (elevatorOpen == true && hallwayBudSpawn != 10) {						//Ready for the next level?
+		if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
+			
+			if (elevatorOpen == true) {							//Ready for the next level?
 
-			if (button(up_but)) {
-				playAudio("audio/elevDing.wav");
-				budState = entering;
-				budFrame = 0;				
+				if (button(up_but)) {
+					playAudio("audio/elevDing.wav");
+					budState = entering;
+					budFrame = 0;				
+				}
+				
+				drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
+				drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
+				
+				if (++inArrowFrame > 7) {
+					inArrowFrame = 0;
+				}
+		
 			}
 			
-			drawSprite(budX, budY - 28 - (inArrowFrame >> 1), 6, 16 + 14, 2, 1, 4, false, false);		//IN ARROW sprites			
-			drawSprite(budX, budY - 20, 6, 16 + 15, 2, 1, 4, false, false);		//IN ARROW sprites
-			
-			if (++inArrowFrame > 7) {
-				inArrowFrame = 0;
-			}
-	
 		}
+	
+	}
 		
-	}
 	
-	// if (button(B_but)) {
-		// thingAdd(bigRobot, 100, 64);
-		// //playAudio("audio/getread.wav");
-		// //playAudio("audio/back.wav");
-		// //drawText("supercalifraguliosdosis", 0, 14, true);
-		// //pwm_set_freq_duty(6, 261, 25);
-		// //pwm_set_freq_duty(8, 277, 50);
-	// }	
-	
-	if (button(A_but)) {
-		playAudio("audio/hitModem.wav");
-	}		
 	
 	
 }
 
-void setupHallway() {
-
-	loadPalette("hallway/hallway.dat");            	//Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("hallway/hallway.nes", 0, 256);		//Load hallway tiles into page 0
-	
-	loadPattern("sprites/bud.nes", 256, 256);		//Load bud sprite tiles into page 1	
-	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
-	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots	
-	
-	setButtonDebounce(up_but, true, 1);		//Debounce UP for door entry
-	setButtonDebounce(down_but, false, 0);
-	setButtonDebounce(left_but, false, 0);
-	setButtonDebounce(right_but, false, 0);
-	
-	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
-
-	switch(hallwayBudSpawn) {
-	
-		case 0:				//Breaking glass stage 1
-			budSpawned = false;
-			budSpawnTimer = 0;
-			spawnIntoHallway(6, 5, 40);
-			break;
-			
-			
-		case 10:			//Emerge from elevator (stage 2-6)
-			budSpawned = true;
-			budDir = false;		
-			spawnIntoHallway(66, 7, 104);
-			break;
-			
-		default:			//Emerge from cleared condo
-			budSpawned = true;
-			budDir = false;			
-			spawnIntoHallway(doorTilePos[currentCondo - 1] - 6, 7, 104);		
-			break;
-	
-	}
-
-	drawHallway(currentFloor);	
-
-	displayPause = false;   		//Allow core 2 to draw
-	isDrawn = true;	
-	
-}
-
-
-
-void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
-
-	budFrame = 0;
-	budSubFrame = 0;
-	budDir = false;											//True = going left
-
-	budX = budStartCoarseX * 8;								//Position of Bud on LCD, LCD coord
-	budY = budStartFineY;
-	
-	budWorldX = 8 * (windowStartCoarseX + budStartCoarseX);			//Bud's position in the world (not the same as screen or tilemap)
-	budWorldY = budStartFineY;
-	xWindowBudFine = 0;										//Used to track when Bud crosses tile barriers
-
-	worldX = 8 * windowStartCoarseX;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
-	worldY = 0;
-
-	xWindowFine = 0;										//The fine scrolling amount
-	xWindowCoarse = windowStartCoarseX & 0x1F;				//In the tilemap, the left edge of the current positiom (coarse)
-	xWindowBudToTile = xWindowCoarse + (budStartCoarseX + 1);		//Where Bud is in relation to the onscreen portion of the name table (not the level map) to detect platforms etc
-		
-	xStripLeft = xWindowCoarse - budStartCoarseX;	//6				//Set the left draw edge in the tilemap
-	
-	if (xStripLeft < 0) {							//Handle negative rollover
-		xStripLeft += 32;
-	}
-	
-	xStripRight = ((xStripLeft + 26) & 0x1F);		//Compute right edge
-	
-	xLevelStripLeft = windowStartCoarseX - budStartCoarseX;		//Strip redraw position on left (when moving left)
-	xLevelCoarse = windowStartCoarseX;				//In the tilemap, the left edge of the current positiom (coarse)	
-	xLevelStripRight = xLevelStripLeft + 26;	//6	//Strip redraw position on right (when moving right)
-
-}
-
-
-void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
-	
-	budWx1 = x1;
-	budWy1 = y1;	
-	budWx2 = x2;
-	budWy2 = y2;	
-}
-
-void setBudAttackBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
-	
-	budAx1 = x1;
-	budAy1 = y1;	
-	budAx2 = x2;
-	budAy2 = y2;
-	
-}
-
-
-
-
-bool budMoveLeft(int speed) {
+bool budMoveLeftC(int speed) {
 
 	if (budY > -1) {		//Tile obstacle check first
 		if ((getTileType(budTileCheck(-1), (budY >> 3)) & tileBlocked) == tileBlocked) {		//Check 1 to the left
 			return false;
 		}		
 	}
+
+	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
 		
-	if (windowMoveLeft(speed) == false) {		//Can window NOT scroll left?
 		budX -= speed;
 		budWorldX -= speed;
 		xWindowBudFine -= speed;
@@ -2576,21 +2317,33 @@ bool budMoveLeft(int speed) {
 			xWindowBudFine += 8;			//Reset fine bud screen scroll
 			
 			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		}			
+		}	
+
+		if (budX < 8 && currentMap == condo) {
+			if (kittenCount == kittenTotal) {
+				exitCondo();
+			}
+			else {
+				if (kittenMessageTimer == 0) {
+					kittenMessageTimer = 60;	
+					playAudio("audio/taunt.wav");
+				}
+			}
+		}
 	}
 	
 	return true;
 }
 
-bool budMoveRight(int speed) {
+bool budMoveRightC(int speed) {
 
-	if (budY > -1) {		//Tile obstacle check first
-		if ((getTileType(budTileCheck(3), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
+	if (budY > -1) {							//Tile obstacle check first
+		if ((getTileType(budTileCheck(2), (budY >> 3)) & tileBlocked) == tileBlocked) {			//Check 2 to the right
 			return false;
-		}	
+		}		
 	}
 
-	if (windowMoveRight(speed) == false) {		//Can window NOT scroll left?
+	if (condoMoveRight(speed) == false) {		//Can window NOT scroll right?
 		budX += speed;
 		budWorldX += speed;
 		xWindowBudFine += speed;
@@ -2605,8 +2358,8 @@ bool budMoveRight(int speed) {
 	return true;
 }
 
-bool windowMoveLeft(int theSpeed) {
-	
+bool condoMoveLeft(int theSpeed) {
+
 	if (budX > 48) {
 		return false;
 	}
@@ -2618,11 +2371,11 @@ bool windowMoveLeft(int theSpeed) {
 	
 	if (xWindowFine < 0) {				//Passed tile boundary?
 	
-		if (xLevelCoarse == 6) {		//At left edge?
+		if (xLevelCoarse == 0) {		//At left edge?
 			xWindowFine = 0;			//Clear out fine register, we can't go further left
 			worldX += theSpeed;
 			budWorldX += theSpeed;
-			return false;
+			return false;				//Bud can now move past his scroll edge
 		}
 
 		xWindowFine += 8;				//Subtract fine		
@@ -2633,13 +2386,28 @@ bool windowMoveLeft(int theSpeed) {
 		xStripRight = windowCheckLeft(xStripRight);
 
 		xLevelStripLeft--;
+		
+		if (xLevelStripLeft < 0) {
+			xLevelStripLeft += mapWidth;
+		}
+		
 		xLevelCoarse--;
-		xLevelStripRight--;
+		
+		xLevelStripRight--;		
+		
+		if (xLevelStripRight < 0) {
+			xLevelStripRight += mapWidth;
+		}
 
 		xStripDrawing = xStripLeft;			//Where to draw new tiles on tilemap
-		
-		drawHallwayTiles(xLevelStripLeft);	//Draw the strip
-		
+			
+		if (currentMap == hallway) {
+			//drawHallwayTiles(xLevelStripLeft);				//Draw the strip
+			drawCondoStrip(xLevelStripLeft, xStripLeft);	//Draw the hallway
+		}
+		else {
+			drawCondoStrip(xLevelStripLeft, xStripLeft);	//Draw the hallway
+		}
 
 	}	
 	
@@ -2647,7 +2415,7 @@ bool windowMoveLeft(int theSpeed) {
 		
 }
 
-bool windowMoveRight(int theSpeed) {
+bool condoMoveRight(int theSpeed) {
 	
 	if (budX < 56) {
 		return false;
@@ -2660,11 +2428,11 @@ bool windowMoveRight(int theSpeed) {
 	
 	if (xWindowFine > 7) {				//Passed tile boundary?
 	
-		if (xLevelCoarse == 126) {		//At right edge?
+		if (xLevelCoarse == (mapWidth - 16)) {		//At right edge?
 			xWindowFine = 7;			//Max out fine register, we can't go further right
 			worldX -= theSpeed;
 			budWorldX -= theSpeed;
-			return false;
+			return false;				//Bud can now move past his scroll edge
 		}
 	
 		xWindowFine -= 8;				//Subtract fine		
@@ -2675,12 +2443,28 @@ bool windowMoveRight(int theSpeed) {
 		xStripRight = windowCheckRight(xStripRight);
 
 		xLevelStripLeft++;
+		
+		if (xLevelStripLeft == mapWidth) {
+			xLevelStripLeft -= mapWidth;
+		}
+		
 		xLevelCoarse++;
-		xLevelStripRight++;
+		
+		xLevelStripRight++;		
+		
+		if (xLevelStripRight == mapWidth) {
+			xLevelStripRight -= mapWidth;
+		}
 
 		xStripDrawing = xStripRight;			//Where to draw new tiles on tilemap
-		
-		drawHallwayTiles(xLevelStripRight);	//Draw the strip		
+	
+		if (mapWidth == hallwayWidth) {
+			//drawHallwayTiles(xLevelStripRight);	//Draw the strip
+			drawCondoStrip(xLevelStripRight, xStripRight);
+		}
+		else {
+			drawCondoStrip(xLevelStripRight, xStripRight);
+		}
 
 	}
 
@@ -2731,6 +2515,49 @@ int budTileCheck(int whereTo) {
 	
 }
 
+
+void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
+	
+	budWx1 = x1;
+	budWy1 = y1;	
+	budWx2 = x2;
+	budWy2 = y2;	
+}
+
+void setBudAttackBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
+	
+	budAx1 = x1;
+	budAy1 = y1;	
+	budAx2 = x2;
+	budAy2 = y2;
+	
+}
+
+
+
+
+void stopWatchTick() {
+
+	if (++frames == 30) {
+		frames = 0;
+		if (++seconds == 60) {
+			seconds = 0;
+			++minutes;
+		}			
+	}
+
+}
+
+void stopWatchClear() {
+
+	seconds = 0;
+	minutes = 0;
+	
+}
+
+
+
+
 int checkDoors() {
 	
 	uint16_t tileX = budWorldX >> 3;			//Convert Bud fine world X to tiles X
@@ -2759,7 +2586,7 @@ int checkElevator() {
 		return -1;
 	}
 
-	if (tileX >= 71 && tileX <= 74) {			//Is Bud aligned with elevator?
+	if (tileX >= 65 && tileX <= 68) {			//Is Bud aligned with elevator?
 		return 1;
 	}
 
@@ -2769,45 +2596,43 @@ int checkElevator() {
 
 void drawHallway(int floor) {
 
-	for (int x = 0 ; x < 148 ; x++) {
+	for (int x = 0 ; x < mapWidth ; x++) {
 		populateObject(x, hallBlank, 1);		
 	}
 	
-	populateObject(6, 3, 4);			//Left wall
-	populateObject(138, 4, 4);			//Right wall
+	populateObject(0, 3, 4);			//Left wall
+	populateObject(132, 4, 4);			//Right wall
 
 	int drawWhichDoor = 1;
 
-	int xx = 10;
+	int xx = 4;
 
 	for (int x = 0 ; x < 3 ; x++) {
 		populateObject(xx, hallCounter, 4);
-		//populateDoor(xx + 6, drawWhichDoor++, false);				//Stuffs the high byte with BCD floor/door number
 		populateObject(xx + 12, hallCounter, 4);	
 
 		xx += 18;
 		
 	}
 	
-	populateObject(10, hallCounterWindow, 4);
+	populateObject(4, hallCounterWindow, 4);
 
-	populateObject(64, hallCounter, 4);
-	populateObject(70, hallElevator, 8);
-	populateObject(78, hallCallButton, 1);
-	populateObject(80, hallCounter, 4);
+	populateObject(58, hallCounter, 4);
+	populateObject(64, hallElevator, 8);
+	populateObject(72, hallCallButton, 1);
+	populateObject(74, hallCounter, 4);
 	
-	xx = 86;
+	xx = 80;
 
 	for (int x = 0 ; x < 3 ; x++) {
 		populateObject(xx, hallCounter, 4);
-		//populateDoor(xx + 6, drawWhichDoor++, false);				//Stuffs the high byte with BCD floor/door number
 		populateObject(xx + 12, hallCounter, 4);	
 
 		xx += 18;
 		
 	}	
 	
-	populateObject(134, hallCounterWindow, 4);
+	populateObject(128, hallCounterWindow, 4);
 	
 	for (int x = 0 ; x < 6 ; x++) {
 	
@@ -2817,17 +2642,12 @@ void drawHallway(int floor) {
 		else {
 			populateDoor(doorTilePos[x], x + 1, false);
 		}
-
-	}
-	
-
-	for (int x = 150 ; x < 1000 ; x += 100) {
-		thingAdd(greenie, x, 32);
 		
-		thingAdd(greenie, x + 50, 64);
+		thingAdd(greenie, (doorTilePos[x] << 3) + 12, 32);
+
 	}
-	
-	entryWindow = thingAdd(hallWindow, 80, 48);			//Get the index for this one
+
+	entryWindow = thingAdd(hallWindow, 32, 48);			//Get the index for this one
 	
 	if (currentCondo > 0) {							//Bud has already been in a condo?
 		if (floor == 1) {
@@ -2842,14 +2662,19 @@ void drawHallway(int floor) {
 		thing[entryWindow].state = 0;				//Intact window, will be broken
 	}
 
-	thingAdd(hallWindow, 1071, 48);						//Other window
+	thingAdd(hallWindow, 1023, 48);						//Other window
 	
-	thingAdd(chandelier, 200, 0);
-	thingAdd(chandelier, 344, 0);	
-	thingAdd(chandelier, 488, 0);
-	thingAdd(chandelier, 664, 0);
-	thingAdd(chandelier, 808, 0);
-	thingAdd(chandelier, 952, 0);
+	thingAdd(chandelier, 152, 0);
+	thingAdd(chandelier, 296, 0);	
+	thingAdd(chandelier, 440, 0);
+	thingAdd(chandelier, 616, 0);
+	thingAdd(chandelier, 760, 0);
+	thingAdd(chandelier, 904, 0);
+
+
+	for (int x = 0 ; x < 6 ; x++) {
+		thingAdd(bigRobot, 100 + (x * 20), 64);
+	}
 
 	redrawCurrentHallway();
 	
@@ -3112,6 +2937,9 @@ void hallwayDoorStripClosed(int whichStrip, int whichDoorNum) {		//Hallway objec
 	
 }
 
+
+
+
 void hallwayDoorStripOpen(int whichStrip, int whichDoorNum) {		//Hallway object 1
 
 	const char tiles[4][9] = {
@@ -3253,17 +3081,7 @@ void hallwayElevator(int whichStrip) {		//Hallway object 5
 	
 }
 
-void drawChandelier(int tileX) {
-	
-	for (int y = 0 ; y < 3 ; y++) {
-		
-		for (int x = 0 ; x < 4 ; x++) {	
-			drawTile(tileX + x, y + 1, x, y + 13, 3);
-		}
-		
-	}
 
-}
 
 int thingAdd(int whichThing, int16_t x, int16_t y) {
 	
@@ -3285,7 +3103,7 @@ int thingAdd(int whichThing, int16_t x, int16_t y) {
 			thing[index].active =  true;
 			thing[index].state = 1;						//Active
 			thing[index].type = bigRobot;
-			thing[index].setPos(400, 64);
+			thing[index].setPos(x, 64);
 			thing[index].dir = true;					//Starts out facing left
 			thing[index].setSize(3 * 8, 6 * 8);
 			thing[index].turning = false;
@@ -3475,7 +3293,219 @@ void thingLogic() {
 
 
 
+void drawHallwayDoorClosed(int whichStrip, int whichDoorNum) {		//whichDoorNum is 1-6
 
+	const char tiles[4][9] = {
+		{ 0x99, 0x93, 0x93, 0x93, 0x93, 0x93, 0x93, 0x90, 0xA0 },
+		{ 0x9A, 0x94, 0x97, 0x94, 0x94, 0x9F, 0x94, 0x91, 0xA1 },	//By default it draws as number XX. If not cleared, draw floor-room # over this
+		{ 0x9A, 0x94, 0x98, 0x94, 0x94, 0x9F, 0x94, 0x91, 0xA2 },		
+		{ 0x9B, 0x95, 0x95, 0x96, 0x95, 0x95, 0x95, 0x92, 0xA3 },		
+	};
+
+	for (int col = 0 ; col < 4 ; col++) {
+		drawTileMap(whichStrip, 14, 0x9E, 3, tileBlocked);		//Draw floor
+		
+		for (int g = 0 ; g < 8 ; g++) {
+			drawTileMap(whichStrip, 13 - g, tiles[col][g], 0, 0);		//Draw door in strips
+		}		
+		setTileTypeMap(whichStrip, 13, tilePlatform);						//Bottom row is platform type
+	
+		if (col == 1) {		
+			if (apartmentState[whichDoorNum - 1] == 0) {						//Apartment not clear? (MSB set)
+				drawTileMap(whichStrip, 8, 0x80 + currentFloor, 0, 0);		//Draw floor #
+			}
+		}
+		if (col == 2) {
+			if (apartmentState[whichDoorNum - 1] == 0) {						//Apartment not clear? (MSB set)
+				drawTileMap(whichStrip, 8, 0x80 + whichDoorNum, 0, 0);		//Draw condo # +1 because zero offset
+			}			
+		}	
+	
+		setTileTypeMap(whichStrip, 5, tilePlatform);						//Top sil is platform
+	
+		whichStrip++;
+	
+	}
+
+
+	
+}
+
+void drawHallwayDoorOpen(int whichStrip, int whichDoorNum) {		//Hallway object 1
+
+	const char tiles[4][9] = {
+		{ 0x8E, 0x8D, 0x8D, 0x8D, 0x8D, 0x8D, 0x8D, 0x8A, 0xA0 },
+		{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x8B, 0xA1 },	
+		{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x8B, 0xA1 },		
+		{ 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x8C, 0xA3 },		
+	};
+
+	for (int col = 0 ; col < 4 ; col++) {
+		drawTileMap(whichStrip, 14, 0x9E, 3, tileBlocked);		//Draw floor
+		
+		for (int g = 0 ; g < 8 ; g++) {
+			drawTileMap(whichStrip, 13 - g, tiles[col][g], 0, 0);		//Draw door in strips
+		}		
+		setTileTypeMap(whichStrip, 13, tilePlatform);						//Bottom row is platform type
+		setTileTypeMap(whichStrip, 5, tilePlatform);						//Top sil is platform
+		whichStrip++;
+	
+	}
+		
+}
+
+void drawHallwayCounter(int whichStrip) {	//Hallway object 2
+
+	const char tiles[4][5] = {
+		{ 0xF0, 0xE0, 0xD0, 0xC0 },
+		{ 0xF1, 0xE1, 0xD1, 0xC1 },	
+		{ 0xF2, 0xE2, 0xD2, 0xC2 },		
+		{ 0xF3, 0xE3, 0xD3, 0xC3 },		
+	};
+
+	for (int col = 0 ; col < 4 ; col++) {
+		drawTileMap(whichStrip, 14, 0x9E, 3, tileBlocked);		//Draw floor
+		
+		for (int g = 0 ; g < 4 ; g++) {
+			drawTileMap(whichStrip, 13 - g, tiles[col][g], 1, 0);
+		}	
+		
+		setTileTypeMap(whichStrip, 13, tilePlatform);			//Cell above floor is plat
+		
+		drawTileMap(whichStrip, 10, tiles[col][3], 3, 0);		//Top is a dif pallete
+		
+		setTileTypeMap(whichStrip, 9, tilePlatform);			//Cell above is a plat
+
+		whichStrip++;
+		
+	}
+	
+}
+
+void drawHallwayCounterWindow(int whichStrip) {						//Counter + window (black BG covered with sprite)
+
+	const char tiles[4][5] = {
+		{ 0xF4, 0xE4, 0xD4, 0xC4 },
+		{ 0xF5, 0xE5, 0xD5, 0xC5 },	
+		{ 0xF6, 0xE6, 0xD6, 0xC6 },		
+		{ 0xF7, 0xE7, 0xD7, 0xC7 },		
+	};
+
+	for (int col = 0 ; col < 4 ; col++) {
+		drawTileMap(whichStrip, 14, 0x9E, 3, tileBlocked);		//Draw floor
+		
+		for (int g = 0 ; g < 4 ; g++) {
+			drawTileMap(whichStrip, 13 - g, tiles[col][g], 1, 0);
+		}	
+		
+		setTileTypeMap(whichStrip, 13, tilePlatform);			//Cell above floor is plat
+		
+		drawTileMap(whichStrip, 10, tiles[col][3], 3, 0);		//Top is a dif pallete
+		
+		setTileTypeMap(whichStrip, 9, tilePlatform);			//Cell above is a plat
+	
+		for (int g = 6 ; g < 9 ; g++) {
+			drawTileMap(whichStrip, g, ' ', 3, 0);		    //Black hole for windows
+		}
+
+		whichStrip++;
+		
+	}
+
+	
+}
+
+void drawHallwayElevator(int whichStrip) {							//Elevator (open or closed)
+
+	char floorText[7] = { 0xDC, 0xDD, 0xDE, 0xDF, 0xDC, 0xDC, 0xDC };
+	
+	floorText[4] = currentFloor + 0x80;
+
+	if (elevatorOpen == false) {
+		const char tiles[8][10] = {
+			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA0 },
+			{ 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xA1 },	
+			{ 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xA1 },	
+			{ 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xFC, 0xA1 },
+			{ 0xEC, 0xEC, 0xEC, 0xEC, 0xEC, 0xEC, 0xEC, 0xEC, 0xEC, 0xA1 },
+			{ 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xA1 },	
+			{ 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xA1 },		
+			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA3 },		
+		};
+
+		for (int col = 0 ; col < 8 ; col++) {
+			
+			for (int g = 0 ; g < 9 ; g++) {
+				drawTileMap(whichStrip, 13 - g, tiles[col][g], 3, 0);
+			}	
+			
+			setTileTypeMap(whichStrip, 13, tilePlatform);
+			
+			drawTileMap(whichStrip, 4, tiles[col][9], 3, tilePlatform);	//Draw top sil of doorway as platform
+	
+			if (col > 0 && col < 7) {
+				drawTileMap(whichStrip, 3, floorText[col - 1], 0, 0);
+			}
+	
+			whichStrip++;
+	
+			
+		}
+					
+	}
+	else {
+		const char tiles[8][10] = {
+			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA0 },
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xA1 },	
+			{ 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xA3 },		
+		};
+
+		for (int col = 0 ; col < 8 ; col++) {
+			
+			for (int g = 0 ; g < 9 ; g++) {
+				drawTileMap(whichStrip, 13 - g, tiles[col][g], 3, 0);
+			}	
+			
+			setTileTypeMap(whichStrip, 13, tilePlatform);
+			
+			drawTileMap(whichStrip, 4, tiles[col][9], 3, tilePlatform);	//Draw top sil of doorway as platform
+	
+			if (col > 0 && col < 7) {
+				drawTileMap(whichStrip, 3, floorText[col - 1], 0, 0);
+			}
+			
+			whichStrip++;
+			
+		}
+	}
+
+}
+
+
+
+
+void drawTileMap(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags) {		//Same as the one in library but it draws to condomap memory
+	
+		flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
+
+		condoMap[yPos][xPos] = (flags << 8) | (whatPalette << 8) | whatTile;			//Palette points to a grouping of 4 colors, so we shift the palette # 2 to the left to save math during render		
+
+}
+
+void setTileTypeMap(int tileX, int tileY, int flags) {						
+	
+	flags &= 0xF8;							//You can use the top 5 bits for attributes, we lob off anything below that (the lower 3 bits are for tile palette)
+	
+	condoMap[tileY][tileX] &= 0x07FF;				//AND off the top 5 bits
+	
+	condoMap[tileY][tileX] |= (flags << 8);		//OR it into the tile in nametable
+	
+}
 
 
 
@@ -3484,9 +3514,7 @@ void thingLogic() {
 void setupEdit() {
 
 	clearObjects();
-
-	loadPalette("condo/condo.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles
+	
 	loadPattern("sprites/bud.nes", 256, 256);
 	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
 	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots
@@ -3503,6 +3531,39 @@ void setupEdit() {
 
 	cursorMoveTimer = 0;
 	
+	currentFloor = 1;			//Default edit start
+	
+	if (editType == true) {
+		loadPalette("condo/condo.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+		loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles	
+		mapWidth = condoWidth;
+		fileNameCondo = '1';			
+		populateEditCondo();
+	}
+	else {
+		loadPalette("hallway/hallway.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+		loadPattern("hallway/hallway.nes", 0, 256);			//Table 0 = condo tiles	
+		mapWidth = hallwayWidth;
+		fileNameCondo = '0';								//Hallway is floor x, condo 0		
+		populateEditHallway();
+	}
+
+	editState = tileDrop;			//State of editor to start
+
+	editEntryFlag = true;			//Entry flag, user must release A before we can draw
+
+	redrawEditWindow();	
+	
+	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
+	
+	editDisableCursor = false;
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;		
+	
+}
+
+void populateEditCondo() {
+	
 	for (int x = 0 ; x < 8 ; x++) {							//8 screens wide
 		
 		for (int y = 0 ; y < 13 ; y++) {					//Top 13 rows (bottom is floor)
@@ -3515,19 +3576,18 @@ void setupEdit() {
 		condoMap[12][(x * 15) + 14] = 0xF0;					//Screen edge line marker
 		
 	}	
-	
-	
-	for (int x = 0 ; x < condoWidth ; x++) {		//Floor
+		
+	for (int x = 0 ; x < mapWidth ; x++) {		//Floor
 		condoMap[14][x] = 0x5C | (tileBlocked << 8) | (3 << 8);
 	}
-	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
+	for (int x = 0 ; x < mapWidth ; x++) {		//Platform (blank, one above floor)
 		condoMap[13][x] = ' ' | (3 << 8);
 	}		
 	for (int y = 0 ; y < 13 ; y++) {
 		condoMap[y][0] = 0x5B | (tileBlocked << 8)| (3 << 8);						//Left wall
 	}	
 	for (int y = 0 ; y < 13 ; y++) {
-		condoMap[y][condoWidth - 1] = 0x5D | (tileBlocked << 8)| (3 << 8);				//Right wall
+		condoMap[y][mapWidth - 1] = 0x5D | (tileBlocked << 8)| (3 << 8);				//Right wall
 	}
 
 	for (int g = 0 ; g < 8 ; g++) {
@@ -3547,25 +3607,76 @@ void setupEdit() {
 		}		
 	}
 
-	updateMapFileName();						//Draw the room number on door
+	updateMapFileNameEdit();						//Draw the room number on door
 	
-	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
+	for (int x = 0 ; x < mapWidth ; x++) {		//Platform (blank, one above floor)
 		condoMap[13][x] |= (tilePlatform << 8);		//Set platform on all tiles above the floor
 	}		
-	
-	editState = tileDrop;			//State of editor to start
+		
+}
 
-	editEntryFlag = true;			//Entry flag, user must release A before we can draw
 
-	redrawEditWindow();	
+void populateEditHallway() {
+
+	for (int x = 0 ; x < mapWidth ; x++) {								//Floor
+		condoMap[14][x] = 0x9E | (tileBlocked << 8) | (3 << 8);							
+		condoMap[13][x] = 0x9C | (tilePlatform << 8) | (3 << 8);								//Platform (trim, one above floor)
+		
+		for (int y = 0 ; y < 13 ; y++) {
+			condoMap[y][x] = 0xB2 | (3 << 8);										//Blank wall
+		}		
+	}		
+	for (int y = 0 ; y < 14 ; y++) {
+		condoMap[y][0] = 0xB0 | (tileBlocked << 8) | (3 << 8);						//Left wall
+	}	
+	for (int y = 0 ; y < 14 ; y++) {
+		condoMap[y][mapWidth - 1] = 0xB1 | (tileBlocked << 8) | (3 << 8);				//Right wall
+	}
+
+	int xx = 4;							//Shelf things
+
+	for (int x = 0 ; x < 3 ; x++) {		
+		drawHallwayCounter(xx);		
+		drawHallwayCounter(xx + 12);
+		xx += 18;	
+	}
+
+	xx = 80;
+
+	for (int x = 0 ; x < 3 ; x++) {		
+		drawHallwayCounter(xx);		
+		drawHallwayCounter(xx + 12);
+		xx += 18;	
+	}
 	
-	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
+	populateEditDoors();
 	
-	editDisableCursor = false;
-	displayPause = false;   		//Allow core 2 to draw
-	isDrawn = true;		
+	updateMapFileNameEdit();
+	
+	//drawHallwayElevator(64);
+
+	condoMap[9][72] = 0xF9 | (1 << 8);				//Call button
+	
+	drawHallwayCounterWindow(4);
+	drawHallwayCounterWindow(128);
+
+}
+
+void populateEditDoors() {
+
+	for (int x = 0 ; x < 6 ; x++) {
+
+		if (apartmentState[x] & 0x40) {			//Door open bit set? (bud emerging from condo)
+			drawHallwayDoorOpen(doorTilePos[x], x + 1);
+		}
+		else {
+			drawHallwayDoorClosed(doorTilePos[x], x + 1);			//Closed door
+		}
+
+	}	
 	
 }
+
 
 void drawEditMenuPopUp() {
 
@@ -3589,6 +3700,14 @@ void drawEditMenuPopUp() {
 	drawText("LOAD FILE", 1, 6, false);
 	drawText("EXIT TO MENU", 1, 7, false);		
 
+	int condoZero = 49;				//Normal select range 1-6
+	int condoHigh = 54;
+	
+	if (editType == false) {		//If editing a hallway, the condo # must be 0
+		condoZero = 48;
+		condoHigh = 48;
+	}
+
 	if (button(left_but)) {
 		switch(editMenuSelectionY) {		
 			case 0:
@@ -3602,14 +3721,14 @@ void drawEditMenuPopUp() {
 				if (--fileNameFloor < 49) {			//1-6
 					fileNameFloor = 54;					
 				}
-				updateMapFileName();
+				updateMapFileNameEdit();
 			break;
 			
 			case 4:
-				if (--fileNameCondo < 49) {			//1-6
-					fileNameCondo = 54;
+				if (--fileNameCondo < condoZero) {			//1-6
+					fileNameCondo = condoHigh;
 				}	
-				updateMapFileName();	
+				updateMapFileNameEdit();	
 			break;
 		}
 	}
@@ -3626,14 +3745,14 @@ void drawEditMenuPopUp() {
 				if (++fileNameFloor > 54) {			//1-6
 					fileNameFloor = 49;
 				}
-				updateMapFileName();
+				updateMapFileNameEdit();
 			break;
 			
 			case 4:
-				if (++fileNameCondo > 54) {			//1-6
-					fileNameCondo = 49;
+				if (++fileNameCondo > condoHigh) {			//1-6
+					fileNameCondo = condoZero;
 				}
-				updateMapFileName();		
+				updateMapFileNameEdit();		
 			break;
 		}		
 
@@ -3711,9 +3830,32 @@ void updateMapFileName() {				//Call thise in edit/game mode before calling save
 	mapFileName[12] = fileNameFloor;
 	mapFileName[14] = fileNameCondo;
 
-	condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
-	condoMap[8][3] = 0x80 + (fileNameCondo - 48);
+	//condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
+	//condoMap[8][3] = 0x80 + (fileNameCondo - 48);	
+	
+	Serial.print("Game level filename:");
+	Serial.println(mapFileName);
 
+}
+
+void updateMapFileNameEdit() {				//Call thise in edit/game mode before calling save/load
+	
+	mapFileName[12] = fileNameFloor;
+	mapFileName[14] = fileNameCondo;
+
+	if (editType == true) {				//Condo? Change the numbers on the open door on the left
+		Serial.print("CONDO MODE: ");
+		condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
+		condoMap[8][3] = 0x80 + (fileNameCondo - 48);		
+	}
+	else {
+		Serial.print("HALLWAY MODE: ");
+		currentFloor = fileNameFloor - 48;				//Convert ASCII to a number and change the Floor # on top of the elevator
+		populateEditDoors();
+		drawHallwayElevator(64);
+	}
+
+	Serial.print("Edit filename:");
 	Serial.println(mapFileName);
 
 }
@@ -3724,13 +3866,17 @@ void saveLevel() {
 	
 	//return;
 
-	for (int x = 0 ; x < condoWidth ; x++) {		//Platform (blank, one above floor)
-		condoMap[13][x] |= (tilePlatform << 8);		//Set platform on all tiles above the floor
+	for (int x = 0 ; x < mapWidth ; x++) {				//Platform (blank, one above floor)
+		condoMap[14][x] |= (tileBlocked << 8);			//Set floor as blocked
+	}	
+
+	for (int x = 1 ; x < (mapWidth - 1) ; x++) {		//Platform (blank, one above floor)
+		condoMap[13][x] |= (tilePlatform << 8);			//Set platform on all tiles above the floor
 	}	
 
 	for (int y = 0 ; y < 15 ; y++) {				//Write the map file in horizontal strips from left to right, top to bottom
 		
-		for (int x = 0 ; x < condoWidth ; x++) {
+		for (int x = 0 ; x < mapWidth ; x++) {
 			
 			//Each map tile is 16 bit, file access is byte-aligned
 			writeByte(condoMap[y][x] >> 8);		//Write high byte first (big endian)
@@ -3821,6 +3967,8 @@ void saveLevel() {
 
 void loadLevel() {
 	
+	Serial.println(mapFileName);
+	
 	if (loadFile(mapFileName) == false) {	
 		makeMessage("FILE NOT FOUND");
 		Serial.println("FILE NOT FOUND");
@@ -3839,7 +3987,7 @@ void loadLevel() {
 	
 	for (int y = 0 ; y < 15 ; y++) {				//Read the map file in horizontal strips from left to right, top to bottom
 		
-		for (int x = 0 ; x < condoWidth ; x++) {
+		for (int x = 0 ; x < mapWidth ; x++) {
 			temp = readByte() << 8;					//Read first byte and put into high byte (big endian)		
 			temp |= readByte();						//OR next byte into the low byte			
 			condoMap[y][x] = temp;
@@ -3881,7 +4029,9 @@ void loadLevel() {
 		redrawEditWindow();			
 	}
 
-
+	for (int x = 0 ; x < mapWidth ; x++) {		
+		condoMap[15][x] = condoMap[14][x];			//Dupe the bottom row into +1 past bottom of tile map so shake doesn't show black
+	}	
 
 }
 
@@ -4024,7 +4174,7 @@ void editLogic() {
 						drawX += 1;
 					}
 					else {
-						if (editWindowX < 105) {
+						if (editWindowX < (mapWidth - 15)) {
 							editWindowX++;	
 							redrawEditWindow();
 						}

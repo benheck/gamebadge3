@@ -58,7 +58,6 @@ bool gameObject::hitBoxSmall(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {
 	
 }	
 
-
 void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 
 	visible = true;
@@ -88,32 +87,92 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 		}
 	}
 
+
+	//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
 	if (category == 0) {						//Gameplay objects?
 		
 		if (type < 4 && moving == true) {		//Evil robuts
 
-			if (turning == true) {
-				offsetX += width;						//Robot turning face
-				if (--animate == 0) {
-					turning = false;
-				}		
-			}
-			
-			if (dir == false) {
-				if (++xPos > (xSentryRight - (width * 8))) {		//Sub robot width from right edge, since we are checking left edge of robot xPos
-					dir = true;
-					turning = true;
-					animate = 4;
+			if (state == 200) {					//State = 100 = short circuiting
+				offsetX = width;				//Use facing forward robot
+				
+				if (animate & 0x01) {			//Swap faces and shake left and right
+
+					xPos -= 2;
+
+					//Sprite draw in order so this will appear above the base robot
+					switch(type) {
+						case 0:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
+						break;
+						
+						case 1:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
+						break;
+						
+						case 2:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
+						break;
+						
+						case 3:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
+						break;					
+					}
+
 				}
+				else {
+					xPos += 2;
+					
+					//Sprite draw in order so this will appear above the base robot
+					switch(type) {
+						case 0:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
+						break;
+						
+						case 1:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 3, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
+						break;
+						
+						case 2:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
+						break;
+						
+						case 3:
+							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
+						break;					
+					}
+					
+				}
+				
+				if (++animate > 15) {			//Half second shake, then set flag for explosion/removal
+					state = 201;					
+				}
+				
 			}
 			else {
-				if (--xPos < (xSentryLeft)) {
-					dir = false;
-					turning = true;
-					animate = 4;					
-				}			
+				if (turning == true) {
+					offsetX += width;						//Robot turning face
+					if (--animate == 0) {
+						turning = false;
+					}		
+				}
+				
+				if (dir == false) {
+					if (++xPos > (xSentryRight - (width * 8))) {		//Sub robot width from right edge, since we are checking left edge of robot xPos
+						dir = true;
+						turning = true;
+						animate = 4;
+					}
+				}
+				else {
+					if (--xPos < (xSentryLeft)) {
+						dir = false;
+						turning = true;
+						animate = 4;					
+					}			
+				}		
 			}
-			
+
 		}
 
 		if (type == 4 && moving == true) {		//Cute kitten
@@ -124,8 +183,8 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 
 
 			if (state == 200) {			
-				drawSprite(xPos - worldX, yPos, 12, 48 + 5, 1, 3, palette, true, false);			//Kitten first
-				drawSprite(xPos - worldX - 4, yPos - 20, 13, 48 + 5, 2, 4, 3, false, false);	//balloon second	
+				drawSprite(xPos - worldX, yPos - worldY, 12, 48 + 5, 1, 3, palette, true, false);			//Kitten first
+				drawSprite(xPos - worldX - 4, yPos - worldY - 20, 13, 48 + 5, 2, 4, 3, false, false);	//balloon second	
 				yPos -= animate;			
 				if (yPos < -30) {
 					active = false;
@@ -151,10 +210,10 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 				
 				if (animate > 20) {		//20 frames off, 20 frames help, 20 frames !!!
 					if (animate < 40) {
-						drawSprite(xPos - worldX, yPos - 10, 8, sheetY + 2, width, 1, 0, false, false);
+						drawSprite(xPos - worldX, yPos - worldY - 10, 8, sheetY + 2, width, 1, 0, false, false);
 					}
 					else {
-						drawSprite(xPos - worldX, yPos - 10, 10, sheetY + 2, width, 1, 0, false, false);
+						drawSprite(xPos - worldX, yPos - worldY - 10, 10, sheetY + 2, width, 1, 0, false, false);
 					}
 				}
 				
@@ -166,7 +225,7 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 	
 		if (type == 5 && moving == true) {		//Greenie?
 			
-			drawSprite(xPos - worldX, yPos, 0x06, 16 + animate, 5, false, false);
+			drawSprite(xPos - worldX, yPos - worldY, 0x06, 16 + animate, 5, false, false);
 
 			visible = true;
 
@@ -192,9 +251,62 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 
 	
 	}
+	
+	if (category == 10 && type == 6) {		//Breaking glass shards
+	
+		bool flipIt = true;
+		
+		if ((subAnimate & 0x02) == 0x02) {		//Mirror on the 2's
+			flipIt = false;
+		}
 
-	if (visible == true) {
-		drawSprite(xPos - worldX, yPos, sheetX + offsetX, sheetY + offsetY, width, height, palette, dir, false);		
+		if ((++subAnimate & 0x01) == 0x01) {	//Flicker on the 1's
+			drawSprite(xPos - worldX, yPos - worldY, sheetX + offsetX, sheetY + offsetY, width, height, palette, flipIt, false);
+		}
+		
+		return;
+		
+	}
+
+	if (category == 100) {			//Object has become an EXPLOSION!
+
+		switch(animate) {		//Animate on 2's
+		
+			case 0:
+				drawSprite(xPos - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
+			break;
+			
+			case 1:
+				drawSprite(xPos - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
+			break;
+			
+			case 2:
+				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 8, 48 + 8, 4, 4, 4, dir, false);
+			break;
+							
+			case 3:
+				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 8, 48 + 12, 4, 4, 4, dir, false);
+			break;
+			
+			case 4:
+				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 12, 48 + 12, 4, 4, 4, dir, false);
+			break;			
+			
+		}
+
+		if (++subAnimate == 2) {
+			subAnimate = 0;
+
+			if (++animate == 5) {		
+				active = 0;
+			}
+			
+		}
+			
+	}
+
+	if (visible == true && category < 100) {
+		drawSprite(xPos - worldX, yPos - worldY, sheetX + offsetX, sheetY + offsetY, width, height, palette, dir, false);		
 	}
 
 }

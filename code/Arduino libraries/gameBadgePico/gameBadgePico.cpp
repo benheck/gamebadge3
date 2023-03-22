@@ -5,6 +5,7 @@
 #include "Arduino.h"
 #include "pico_ST7789.h"
 #include "gameBadgePico.h"
+#include "flash_font.h"								//Small flash array that stores A-Z so we can do a message without the file system loaded
 
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
@@ -35,7 +36,7 @@ static uint16_t linebuffer[2][3840];    //Sets up 2 buffers of 120 longs x 16 li
 static uint16_t nameTable[32][32];		//4 screens of tile data. Can scroll around it NES-style (LCD is 15x15, tile is 16X16, slightly larger) X is 8 bytes wider to hold the palette reference (similar to NES but with 1 cell granularity)
 static uint16_t patternTable[8192];		//256 char patterns X 8 lines each, 16 bits per line. Same size as NES but chunky pixel, not bitplane and stored in shorts
 static uint16_t spriteBuffer[14400];
-uint16_t paletteRGB[32];				//Stores the 32 colors as RGB values, pulled from nesPaletteRGBtable
+uint16_t paletteRGB[64];				//Stores the 32 colors as RGB values, pulled from nesPaletteRGBtable (with space for 32 extra)
 uint16_t nesPaletteRGBtable[64];		//Stores the current NES palette in 16 bit RGB format
 
 #define spriteAlphaColor 	0x0001		//The 16-bit LCD RGB color that is used for sprite transparency (make sure nothing in the palette matches it)
@@ -146,7 +147,33 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 		setButtonDebounce(x, debounce[x], debounceStart[x]);			//Pass the default values back into themselves. User can change these later on
 		//For instance menus, you'll want to set a debounce for the d-pad so it's one click per action. Then disable d-pad debounce when game starts	
 	}
+	
+	//Load "emergency" font from flash into RAM so we can show a message if not pattern files present yet
 
+	paletteRGB[3] = 0xFFFF;			//Palette 0, color 3, force WHITE
+
+	unsigned char lowBit[8];
+	unsigned char highBit[8];
+
+	int arrayPointer = 0;
+
+	for (uint16_t numChar = 64 ; numChar < (64 + 32) ; numChar++) {		//Read a bitplane filestream created by YY-CHR
+
+		for (int x = 0 ; x < 8 ; x++) {
+			lowBit[x] = flashFont[arrayPointer++];
+		}
+		for (int x = 0 ; x < 8 ; x++) {
+			highBit[x] = flashFont[arrayPointer++];
+		}		
+		
+		convertBitplanePattern(numChar << 3, lowBit, highBit);		//Pass array points to function that will convert to chunky pixels
+
+	}
+	
+	drawText("  NO FILES", 2, 4, false);	
+	drawText("LOAD VIA USB", 2, 6, false);
+	
+	drawText(" AND RESET", 2, 8, false);		
 	
 }
 
@@ -239,7 +266,7 @@ void serviceDebounce() {				//Must be called every frame, even if paused (becaus
 	
 }
 
-//Loads the YY-CHR 64 color palette file (.pal) from file into RAM. This must be called before calling loadPalette as that uses this index to fill tables
+//Loads the YY-CHR 64 color palette file (.pal) from file into RAM. This must be called before calling loadPalette as that uses this index to fill tables. Only need to call this once after boot (color selection palette is static)
 bool loadRGB(const char* path) {
 
 	if (file.open(path, O_RDONLY)) {
@@ -263,7 +290,7 @@ void loadPalette(const char* path) {
 
   file.open(path, O_RDONLY);
 
-  for (int x = 0 ; x < 32 ; x++) {
+  for (int x = 0 ; x < 64 ; x++) {
     updatePalette(x, file.read());							//Use palette.dat file to create an RGB reference for all 32 colors 
   }
 
@@ -1081,8 +1108,8 @@ bool isDMAbusy(int whatChannel) {
 void playAudio(const char* path) {
 	
 	if (audioPlaying == true) {			//Only one sound at a time
-		file.close();
-		//return;
+		//file.close();
+		stopAudio();
 	}
 	
 	if (!file.open(path, O_RDONLY)) {	//Abort if Don Bot's mercy file isn't found
@@ -1106,6 +1133,19 @@ void playAudio(const char* path) {
 
 	dmaAudio();									//Start the audio DMA
 
+}
+
+void stopAudio() {
+
+	if (audioPlaying == false) {
+		return;
+	}
+
+	file.close();	
+	
+	dma_channel_abort(2);			//Kill the other channel
+	dma_channel_abort(1);			//Kill the other channel
+	
 }
 
 void serviceAudio() {					//This is called every game frame to see if PCM audio buffers need re-loading
@@ -1297,11 +1337,33 @@ void writeByte(uint8_t theByte) {					//Writes a byte to current file
 	
 }
 
+void writeBool(bool state) {
+
+	if (state == true) {
+		writeByte(1);
+	}
+	else {
+		writeByte(0);
+	}	
+	
+}	
+
 uint8_t readByte() {								//Reads a byte from the file
 	
 	return file.read();
 	
 }
+
+bool readBool() {
+
+	if (file.read() == 1) {
+		return true;
+	}
+	
+	return false;
+	
+}
+
 
 void closeFile() {									//Closes the active file
 

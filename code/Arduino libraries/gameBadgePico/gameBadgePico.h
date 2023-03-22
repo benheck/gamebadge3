@@ -58,6 +58,7 @@
 	void convertBitplanePattern(uint16_t position, unsigned char *lowBitP, unsigned char *highBitP);
 
 	void playAudio(const char* path);
+	void stopAudio();
 	void serviceAudio();
 	bool fillAudioBuffer(int whichOne);
 	void dmaAudio();
@@ -68,7 +69,9 @@
 	void saveFile(const char* path);
 	bool loadFile(const char* path);
 	void writeByte(uint8_t theByte);
+	void writeBool(bool state);
 	uint8_t readByte();
+	bool readBool();
 	void closeFile();
 	
 	
