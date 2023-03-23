@@ -374,9 +374,12 @@ void menuFrame() {		//This is called 30 times a second. It either calls the main
 	switch(badgeState) {
 	
 		case bootingMenu:							//Special type of load that handles files not being present yet
-			if (menuTimer > 0) {					//If timer active, decrement
-				--menuTimer;
+			if (menuTimer == 65534) {				//Let one frame be drawn to show the LOAD USB FILES message then...
 				displayPause = true;				//Spend most of the time NOT drawing the screen so files can load easier
+			}
+
+			if (menuTimer > 0) {					//If timer active, decrement
+				--menuTimer;				
 			}
 			
 			if (menuTimer == 0) {					//First boot, or did timer reach 0?

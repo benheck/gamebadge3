@@ -151,7 +151,10 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	//Load "emergency" font from flash into RAM so we can show a message if not pattern files present yet
 
 	paletteRGB[3] = 0xFFFF;			//Palette 0, color 3, force WHITE
-
+	// paletteRGB[7] = 0xFFFF;			//Palette 0, color 3, force WHITE
+	// paletteRGB[11] = 0xFFFF;			//Palette 0, color 3, force WHITE	
+	// paletteRGB[15] = 0xFFFF;			//Palette 0, color 3, force WHITE	
+	
 	unsigned char lowBit[8];
 	unsigned char highBit[8];
 
@@ -169,8 +172,8 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 		convertBitplanePattern(numChar << 3, lowBit, highBit);		//Pass array points to function that will convert to chunky pixels
 
 	}
-	
-	drawText("  NO FILES", 2, 4, false);	
+			//0123456789ABCDE
+	drawText(" NO DATA FILES", 0, 4, false);	
 	drawText("LOAD VIA USB", 2, 6, false);
 	
 	drawText(" AND RESET", 2, 8, false);		
