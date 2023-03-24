@@ -129,7 +129,7 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { titleScreen, levelEdit, saveMap, loadMap, game, goHallway, goCondo, goJail, goElevator, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { titleScreen, levelEdit, saveMap, loadMap, game, story, goHallway, goCondo, goJail, goElevator, pauseMode};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = titleScreen;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -284,6 +284,12 @@ int robotsSpaceTimer = 0;			//Time between robot spawns, in ticks
 bool breakWindow = true;
 
 bool cutscene = false;
+
+int cutAnimate = 0;						//Used to animate stuff in cutscenes
+int cutSubAnimate = 0;
+int cutSubAnimate2 = 0;
+int whichScene = 0;					//Which cutscene frame to show
+int explosionCount = 0;
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -564,13 +570,6 @@ void gameFrame() {
 				}
 			}	
 
-			// if (currentFloor & 1) {		//Odd? Edit does condo (default)		//Hallway edit use only
-				// editType = true;	
-			// }
-			// else {
-				// editType = false;		//Even? Edit does hallway
-			// }
-			
 			tileDirect(cursorX, 8, (((currentFloor - 1) * 16) + 128) + 15);
 
 			if (button(up_but)) {
@@ -596,7 +595,8 @@ void gameFrame() {
 					break;
 					
 					case 10:
-						//load game
+						whichScene = 0;
+						switchGameTo(story);
 					break;
 					
 					case 11:
@@ -635,6 +635,13 @@ void gameFrame() {
 					
 		case game:		
 			startGame();			
+			break;
+			
+		case story:
+			if (isDrawn == false) {
+				setupStory();
+			}
+			storyLogic();
 			break;
 			
 		case goHallway:
@@ -1726,6 +1733,316 @@ void elevatorLogic() {
 	
 }
 
+
+void setupStory() {
+	
+	mapWidth = hallwayWidth;			//We used hallway mode to draw most of the story screens	
+	stopAudio();	
+	clearObjects();
+	fillTiles(0, 0, 31, 31, ' ', 3);			//Clear whole area
+
+	fileNameFloor = '1';		//Hallway hub is floor 1, condo 0
+	fileNameCondo = '9';
+	updateMapFileName();
+	loadLevel();										//Load hallway level tiles, we will populate objects and redraw doors manually
+				
+	switch(whichScene) {
+		
+		case 0:
+			loadPalette("story/reporter2.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/reporter_t.nes", 0, 512);		//Table 0 = condo tiles + a few sprites for eye, hair and EXPLOSIONS!		
+
+			drawStoryScreen(0);
+	
+			cutAnimate = 0;
+			menuTimer = 120;
+			break;
+			
+		case 1:
+			loadPalette("story/rob_12.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/rob_nice_t.nes", 0, 256);		//Table 0 = condo tiles + a few sprites for eye, hair and EXPLOSIONS!		
+
+			drawStoryScreen(1);
+	
+			cutAnimate = 0;
+			menuTimer = 70;
+			break;			
+
+		case 2:
+			loadPalette("story/reporter2.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/reporter_t.nes", 0, 512);		//Table 0 = condo tiles + a few sprites for eye, hair and EXPLOSIONS!		
+
+			drawStoryScreen(0);
+			fillTiles(0, 10, 14, 14, ' ', 3);
+			cutAnimate = 0;
+			cutSubAnimate = 19;
+			cutSubAnimate2 = 0;
+			explosionCount = 0;
+			menuTimer = 120;
+			break;
+			
+		case 3:
+			loadPalette("story/rob_12.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/rob_evil_t.nes", 0, 256);		//Table 0 = condo tiles + a few sprites for eye, hair and EXPLOSIONS!		
+
+			drawStoryScreen(2);
+	
+			cutAnimate = 0;
+			menuTimer = 70;
+			break;				
+
+		case 4:
+			loadPalette("story/kitten.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/kitten_t.nes", 0, 256);		//Table 0 = condo tiles + a few sprites for eye, hair and EXPLOSIONS!		
+
+			drawStoryScreen(3);
+			
+			fillTiles(0, 10, 14, 14, ' ', 3);
+	
+			cutAnimate = 0;
+			menuTimer = 130;
+			break;	
+
+			
+		case 5:
+			loadPalette("story/bud_face.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+			loadPattern("story/bud_face_t.nes", 0, 256);			//Table 0 = condo tiles		
+			
+			fillTiles(0, 0, 31, 31, ' ', 3);
+			
+			for (int y = 0 ; y < 10 ; y++) {
+				
+				for (int x = 0 ; x < 12 ; x++) {
+					drawTile(x, y, x, y + 6, 0, 0);
+				}
+			
+			}
+					//0123456789ABCDE
+			drawText(" WHO WILL SAVE", 0, 11, false);
+			drawText(" THE KITTENS?", 0, 12, false);
+			
+			worldX = 96;
+			menuTimer = 65;
+			break;
+		
+	}
+	
+	
+	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+	setWindow(0, 0);
+	isDrawn = true;	
+	displayPause = false;
+		
+	
+}
+
+void storyLogic() {
+
+	switch(whichScene) {
+		
+		case 0:
+			drawSprite(16, 16, 4, 16, 3, 4, 4, false, false);	//Report eyes and hair glint
+			
+			cutAnimate++;
+			
+			if (cutAnimate == 8) {
+				drawTile(3, 5, 0, 0, 0, 0);
+				drawTile(4, 5, 1, 0, 0, 0);
+				drawTile(3, 6, 0, 1, 0, 0);
+				drawTile(4, 6, 1, 1, 0, 0);				
+			}
+			if (cutAnimate == 16) {
+				drawTile(3, 5, 2, 0, 0, 0);
+				drawTile(4, 5, 3, 0, 0, 0);
+				drawTile(3, 6, 2, 1, 0, 0);
+				drawTile(4, 6, 3, 1, 0, 0);	
+				cutAnimate = 0;
+			}
+			menuTimer--;
+			
+			if (menuTimer == 119) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText("WELCOME TO THE", 0, 11, false);
+					drawText(" CONDO OF THE", 0, 12, false);
+					drawText("   FUTURE!", 0, 13, false);
+			}
+			if (menuTimer == 60) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText(" IT IS STAFFED", 0, 11, false);
+					drawText(" ENTIRELY BY...", 0, 12, false);
+			}		
+			if (menuTimer == 0) {
+				whichScene = 1;
+				switchGameTo(story);
+			}
+		
+			break;
+			
+		case 1:
+			menuTimer--;
+			
+			if (menuTimer == 69) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText("SUPER FRIENDLY", 0, 11, false);
+					drawText(" WORKER ROBOTS!", 0, 12, false);
+
+			}
+			if (menuTimer == 0) {
+				whichScene = 2;
+				switchGameTo(story);				
+				
+			}
+		
+			break;			
+	
+		case 2:
+			drawSprite(16, 16, 4, 16, 3, 4, 4, false, false);	//Report eyes and hair glint
+			
+			cutAnimate++;
+			
+			if (cutAnimate == 8) {				//Scared face
+				drawTile(3, 5, 4, 0, 0, 0);
+				drawTile(4, 5, 5, 0, 0, 0);
+				drawTile(3, 6, 4, 1, 0, 0);
+				drawTile(4, 6, 5, 1, 0, 0);				
+			}
+			if (cutAnimate == 16) {
+				drawTile(3, 5, 6, 0, 0, 0);
+				drawTile(4, 5, 7, 0, 0, 0);
+				drawTile(3, 6, 6, 1, 0, 0);
+				drawTile(4, 6, 7, 1, 0, 0);	
+				cutAnimate = 0;
+			}
+			
+			if (++cutSubAnimate == 20 && explosionCount < 4) {
+				cutSubAnimate = 0;
+				budX = random(72, 96);
+				budY = random(16, 56);
+				cutSubAnimate2 = 8;
+				playAudio("audio/bomb.wav");
+				explosionCount++;
+			}
+				
+			if (cutSubAnimate2 > 0) {
+
+				drawSprite(budX, budY, cutSubAnimate2, 16, 2, 2, 3, false, false);
+				if (menuTimer & 0x01) {			//Advance explosion graphic on 2's
+					cutSubAnimate2 += 2;
+					if (cutSubAnimate == 14) {	//3 frames done? End (until respawn)
+						cutSubAnimate2 = 0;
+					}
+				}
+			}
+
+			
+			menuTimer--;
+			
+			if (menuTimer == 100) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+
+					drawText("    OH NO!", 0, 12, false);
+
+			}
+			if (menuTimer == 60) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText(" THE WORKER", 0, 11, false);
+					drawText("  ROBOTS!...", 0, 12, false);
+			}		
+			if (menuTimer == 0) {
+				whichScene = 3;
+				switchGameTo(story);
+			}
+		
+			break;
+
+		case 3:		
+			menuTimer--;
+			
+			if (menuTimer == 69) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText("THEY'VE TURNED", 0, 11, false);
+					drawText("    EVIL!!!", 0, 12, false);
+			}
+			if (menuTimer == 0) {
+				whichScene = 4;
+				switchGameTo(story);							
+			}
+			break;			
+	
+		case 4:		
+			menuTimer--;
+			
+			if (menuTimer == 119) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText("WE ARE GETTING", 0, 11, false);
+					drawText(" REPORTS...", 0, 12, false);
+					playAudio("audio/kitmeow0.wav");
+			}
+			if (menuTimer == 70) {
+				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
+					        //0123456789ABCDE
+					drawText(" THAT INNOCENT", 0, 11, false);
+					drawText("  KITTENS ARE", 0, 12, false);
+					drawText("TRAPPED INSIDE!", 0, 13, false);	
+					playAudio("audio/kitmeow1.wav");					
+			}			
+			if (menuTimer == 0) {
+				whichScene = 5;
+				switchGameTo(story);							
+			}
+			break;		
+			
+		case 5:
+			if (worldX > 0) {
+				worldX -= 4;
+			}			
+			
+			for (int row = 0 ;  row < 10 ;  row++) {
+				setWindowSlice(row, worldX);
+			}
+
+			menuTimer--;
+			
+			if (menuTimer == 35) {
+				for (int y = 0 ; y < 3 ; y++) {
+					
+					for (int x = 0 ; x < 4 ; x++) {
+						drawTile(x + 5, y + 3, x + 12, y + 9, 0, 0);
+					}
+				
+				}				
+			}
+			
+			if (menuTimer == 0) {
+				switchGameTo(game);
+			}
+			
+			break;
+		
+	}
+
+
+	
+}
+
+void drawStoryScreen(int which) {
+	
+	int xCol = which * 15;
+		
+	for (int x = 0; x < 15 ; x++) {				//Draw 26 columns
+		for (int y = 0 ; y < 15 ; y++) {							//Draw by row		
+			tileDirect(x, y, condoMap[y][xCol + x]);
+		}	
+	}		
+	
+}	
 
 
 void nextFloor() {
@@ -2954,9 +3271,12 @@ void setupEdit() {
 		populateEditCondo();
 	}
 	else {
-		loadPalette("story/rob_12.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+		loadPalette("story/kitten.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+		loadPattern("story/kitten_t.nes", 0, 256);			//Table 0 = condo tiles			
+
+		//loadPalette("story/rob_12.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 		//loadPattern("story/rob_nice_t.nes", 0, 256);			//Table 0 = condo tiles			
-		loadPattern("story/rob_evil_t.nes", 0, 256);			//Table 0 = condo tiles			
+		//loadPattern("story/rob_evil_t.nes", 0, 256);			//Table 0 = condo tiles			
 		
 		
 		//loadPalette("story/reporter2.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
@@ -3108,7 +3428,7 @@ void populateEditDoors() {
 
 void drawEditMenuPopUp() {
 
-	fillTiles(0, 0, 14, 8, ' ', 0);			//Clear area
+	fillTiles(0, 0, 14, 8, ' ', 3);			//Clear area
 
 	if (cursorBlink & 0x01) {
 		drawText(">", 0, editMenuSelectionY, false);		
