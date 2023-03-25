@@ -1,3 +1,11 @@
+Required Arduino libraries:
+https://github.com/adafruit/Adafruit_SPIFlash
+
+Sketch->Include Library->Manage Libraries-> search "Adafruit SPI Flash"
+
+Select and install "Adafruit SPIFlash by Adafruit Version 4" or higher. You will be prompted to also install some dependent libraries.
+
+
 Use the SdFat_format sketch to format a Pi Pico's flash for use with a filesystem
 
 1) Load SdFat_format sketch

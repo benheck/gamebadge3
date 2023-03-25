@@ -1917,7 +1917,7 @@ void storyLogic() {
 				cutAnimate = 0;
 			}
 			
-			if (++cutSubAnimate == 20 && explosionCount < 4) {
+			if (++cutSubAnimate == 20 && explosionCount < 5) {
 				cutSubAnimate = 0;
 				budX = random(72, 96);
 				budY = random(16, 56);
@@ -1929,9 +1929,10 @@ void storyLogic() {
 			if (cutSubAnimate2 > 0) {
 
 				drawSprite(budX, budY, cutSubAnimate2, 16, 2, 2, 3, false, false);
+				
 				if (menuTimer & 0x01) {			//Advance explosion graphic on 2's
 					cutSubAnimate2 += 2;
-					if (cutSubAnimate == 14) {	//3 frames done? End (until respawn)
+					if (cutSubAnimate2 == 14) {	//3 frames done? End (until respawn)
 						cutSubAnimate2 = 0;
 					}
 				}
@@ -2028,7 +2029,9 @@ void storyLogic() {
 		
 	}
 
-
+	if (button(A_but)) {
+		switchGameTo(game);
+	}
 	
 }
 
