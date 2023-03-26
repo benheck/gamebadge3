@@ -29,7 +29,7 @@ GBAudio::GBAudio()
 void GBAudio::ProcessWaveforms()
 {   
     volatile byte s1 = 0, s2 = 0, tri = 0;
-    volatile word noise = 0;
+    volatile word noise = 0, dpcm = 0;
 
     for (int i = 0; i < 16; i++) 
     {
@@ -40,12 +40,12 @@ void GBAudio::ProcessWaveforms()
         s2 += tracks[i].Sqr2.synthesize();
         tri += tracks[i].Triangle.synthesize() * 3;
         noise += tracks[i].Noise.synthesize() * 2;
+        dpcm += tracks[i].DPCM.synthesize();
     }
     pwm_set_freq_duty(PULSE1, SAMPLE_RATE, NESDACPulseLUT[s1] * masterVolume);
     pwm_set_freq_duty(PULSE2, SAMPLE_RATE, NESDACPulseLUT[s2] * masterVolume);
-    pwm_set_freq_duty(TRIANGLE, SAMPLE_RATE, NESDACTriNoiseDMCLUT[tri + noise] * masterVolume);
-    pwm_set_freq_duty(NOISE, SAMPLE_RATE, NESDACTriNoiseDMCLUT[tri + noise] * masterVolume);
-    
+    pwm_set_freq_duty(TRINOISE, SAMPLE_RATE, NESDACTriNoiseDMCLUT[tri + noise] * masterVolume);
+    pwm_set_freq_duty(PCM, SAMPLE_RATE, NESDACTriNoiseDMCLUT[dpcm] * masterVolume);
 }
 
 void GBAudio::ServiceTracks()
@@ -107,7 +107,20 @@ void GBAudio::ServiceTracks()
                 byte data = tracks[i].ReadNextByte();       // Read the next byte as extended data
                 tracks[i].Noise.shortMode = (data >> 7);    // Bit 7 = noise mode
                 bool dmcFlag = ((data & 64) >> 6);          // Bit 6 = DMC flag
-                if (dmcFlag) tracks[i].curPos += 2;         // We're not implementing DMC (yet), so if the DMC flag is set, just advance the pointer past it  
+                bool dmcKillFlag = ((data & 32) >> 5);      // Bit 5 = DMC Kill Flag
+                if (dmcFlag) {                              // If the DMC flag is set...  
+                    data =tracks[i].ReadNextByte();         //   Read in next byte as DMC data
+                    byte dmcIndex = data & 0x0F;            //   Lower 4 bits is DMC index
+                    byte fDMCIndex = data >> 4;             //   Upper 4 bits is DMC frequency index?
+                    data = tracks[i].ReadNextByte();        //   Read in next byte
+                    byte dmcSeed = data & 127;              //   Lower 7 bits is the DMC seed
+                    bool dmcLoop = data >> 7;               //   Upper bit indicates DMC looping
+                    byte* dmcAddr = (byte*)(tracks[i].data + tracks[i].dmcOffsets[dmcIndex]);         //   Set the DMC address start
+                    tracks[i].DPCM.play(dmcAddr, tracks[i].dmcLengths[dmcIndex], fDMCIndex, dmcSeed, dmcLoop);  //   Play DMC
+                }
+                if (dmcKillFlag) {                          // Should we kill the DMC?
+                    tracks[i].DPCM.kill();                  // Kill the DMC
+                }
             }
         }
     }
@@ -169,13 +182,16 @@ void GBAudioTrack::Load(const byte* track)
     length = ReadNextWord();                // Read length from the header
     loopPoint = ReadNextWord();             // Read loop point from the header
     curPos++;                               // Skip byte 4 (region data)
-    uint8_t dmcSamples = ReadNextByte();    // Next byte is # DMC samples
+    dmcSamples = ReadNextByte();            // Next byte is # DMC samples
 
-    // We're not using the DPCM track, so here we skip passed all the DMC samples
+    // skip past the DMC samples and set the position as the current file offset. Adding 6 to skip over the 6 bytes of header we just read in
     uint16_t currentFileOffset = 6 + dmcSamples * 2;
+
+    // If there are DMC Samples to be read, read those in and adjust the current file offsets accordingly
     for (int i = 0; i < dmcSamples; i++) {
-        uint16_t dmcLengths =  ReadWord(6 + i * 2);
-        currentFileOffset += dmcLengths;
+        dmcLengths[i] =  ReadWord(6 + i * 2);
+        dmcOffsets[i] = currentFileOffset;
+        currentFileOffset += dmcLengths[i];
     }
 
     base = currentFileOffset;   // Set the address of the start of the actual audio data
