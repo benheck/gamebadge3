@@ -213,18 +213,16 @@ void GBAudio::SetVolume(uint8_t vol)
 void GBAudioTrack::Load(const byte* track)
 {
     data = track;                           // Set the data stream
-    curPos = 0;                             // Reset current position
-    length = ReadNextWord();                // Read length from the header
-    loopPoint = ReadNextWord();             // Read loop point from the header
-    curPos++;                               // Skip byte 4 (region data)
-    dmcSamples = ReadNextByte();            // Next byte is # DMC samples
+    length = ReadWord(0);                   // Read length from the header
+    loopPoint = ReadWord(2);                // Read loop point from the header
+    dmcSamples = ReadByte(5);               // Next byte is # DMC samples
 
     // skip past the DMC samples and set the position as the current file offset. Adding 6 to skip over the 6 bytes of header we just read in
-    uint16_t currentFileOffset = 6 + dmcSamples * 2;
+    uint16_t currentFileOffset = 6 + (dmcSamples << 1);
 
     // If there are DMC Samples to be read, read those in and adjust the current file offsets accordingly
     for (int i = 0; i < dmcSamples; i++) {
-        dmcLengths[i] =  ReadWord(6 + i * 2);
+        dmcLengths[i] =  ReadWord(6 + (i << 1));
         dmcOffsets[i] = currentFileOffset;
         currentFileOffset += dmcLengths[i];
     }
@@ -234,14 +232,14 @@ void GBAudioTrack::Load(const byte* track)
     loaded = true;              // We've loaded data now in this slot
 }
 
-byte GBAudioTrack::ReadByte(uint8_t offset = 0)
+byte GBAudioTrack::ReadByte(uint16_t offset = 0)
 {
     return data[curPos + offset];
 }
 
-word GBAudioTrack::ReadWord(uint8_t offset = 0)
+word GBAudioTrack::ReadWord(uint16_t offset = 0)
 {
-    return ReadByte() * 256 + ReadByte(1);
+    return ReadByte(offset) * 256 + ReadByte(offset + 1);
 }
 
 byte GBAudioTrack::ReadNextByte()

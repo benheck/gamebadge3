@@ -205,8 +205,8 @@ class DMC {
 
 class GBAudioTrack {
     public:
-        byte ReadByte(uint8_t);                 // Read the next 8-bit value from the audio data at the current position
-        word ReadWord(uint8_t);                 // Read the next 16-bit value from the audio data at the current position
+        byte ReadByte(uint16_t);                 // Read the next 8-bit value from the audio data at the current position
+        word ReadWord(uint16_t);                 // Read the next 16-bit value from the audio data at the current position
         byte ReadNextByte();                    // Read the next 8-bit value from the data stream, and advance the pointer
         word ReadNextWord();                    // Read the next 16-bit value from the data stream, and advance the pointer
         bool AtTrackEnd();                      // Indicate if the pointer is at the end of the track
@@ -221,7 +221,7 @@ class GBAudioTrack {
         uint16_t loopPoint;                     // Data position where the track should loop to
         const byte *data;                       // Audio track data
         uint16_t base;                          // Address offset of where the audio data starts
-        uint16_t curPos;                        // Current position of the music data being read
+        uint32_t curPos;                        // Current position of the music data being read
         bool loaded = false;                    // Indicates whether track data has been loaded in this slot
 
         byte dmcSamples;                        // Num of DMC samples is in the music
