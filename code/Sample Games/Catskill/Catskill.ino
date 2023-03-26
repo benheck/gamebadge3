@@ -131,7 +131,7 @@ bool isDrawn = false;													//Flag that tells new state it needs to draw i
 enum stateMachine { bootingMenu, splashScreen };		//State machine of the badge (boot, wifi etc)
 stateMachine badgeState = bootingMenu;
 
-enum stateMachineGame { titleScreen, levelEdit, saveMap, loadMap, game, story, goHallway, goCondo, goJail, goElevator, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { titleScreen, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = titleScreen;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -273,6 +273,7 @@ uint8_t yShake = 0;
 bool gameplayPaused = false;
 
 long score = 0;
+long levelScore = 0;				//What your score was upon entering the level (for saves)
 long propDamage = 0;
 int robotKill = 0;
 
@@ -294,6 +295,10 @@ int whichScene = 0;					//Which cutscene frame to show
 int explosionCount = 0;
 
 int stunTimeStart = 90;
+
+int saveSlots[3] = {0, 0, 0};		//0 = no save data, 1 = save data exists
+
+bool loadFlag = false;
 
 struct repeating_timer timer60Hz;           // Audio track timer
 struct repeating_timer timerWFGenerator;    // Timer for the waveform generator
@@ -617,13 +622,16 @@ void gameFrame() {
 				menuTimer = 0;
 				switch(cursorY) {					
 					case 9:
+						loadFlag = false;				//NEW GAME				
 						switchGameTo(game);
+						//GO CUTSCENE
+						// whichScene = 0;
+						// music.PlayTrack(0, false);
+						// switchGameTo(story);						
 					break;
 					
 					case 10:
-						whichScene = 0;
-						music.PlayTrack(0, false);
-						switchGameTo(story);
+						switchGameTo(loadGame);
 					break;
 					
 					case 11:
@@ -660,8 +668,15 @@ void gameFrame() {
 			}			
 		break;
 					
-		case game:		
-			startGame();			
+		case game:	
+			if (loadFlag == true) {
+				loadFlag = false;
+				resumeGame();
+			}
+			else {
+				//currentFloor = 1;
+				startGame();	
+			}
 			break;
 			
 		case story:
@@ -703,7 +718,27 @@ void gameFrame() {
 			}
 			jailLogic();
 			break;
-	
+
+		case gameOver:
+			if (isDrawn == false) {
+				setupGameOver();
+			}
+			gameOverLogic();
+			break;
+
+		case loadGame:
+			if (isDrawn == false) {
+				setupLoad();
+			}
+			loadLogic();
+			break;	
+
+		case saveGame:
+			if (isDrawn == false) {
+				setupSave();
+			}
+			saveLogic();
+			break;	
 			
 		case pauseMode:
 			if (isDrawn == false) {				//Draw menu...
@@ -810,18 +845,364 @@ void drawPauseMenu() {
 
 //Gameplay-----------------------------------------------
 
+void setupLoad() {
+	
+	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
+	
+	fillTiles(0, 0, 31, 15, ' ', 0);			//Black BG
+			
+	setWindow(0, 0);
+			//0123456789ABCDE
+	drawText("     SELECT", 0, 4, false);			
+	drawText("   LOAD SLOT", 0, 5, false);
+
+	drawText("SLOT 1", 6, 7, false);
+	drawText("SLOT 2", 6, 8, false);
+	drawText("SLOT 3", 6, 9, false);
+
+	checkSaveSlots();
+
+	for (int x = 0 ; x < 3 ; x++) {
+		if (saveSlots[x] == 1) {
+			drawTile(4, x + 7, 0x1E, 4, 0);		//Face
+		}	
+		else {
+			drawTile(4, x + 7, 0x1F, 4, 0);		//Empty square
+		}
+	}
+
+	cursorY = 7;
+	cursorAnimate = 0x0C;
+	
+	setButtonDebounce(up_but, true, 1);
+	setButtonDebounce(down_but, true, 1);
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
+		
+	
+}
+
+void loadLogic() {
+	
+	fillTiles(2, 7, 2, 9, ' ', 0);						//Erase arrows
+	
+	drawTile(2, cursorY, cursorAnimate, 0, 0);			//Animated arrow
+
+	if (++cursorTimer > 3) {
+		cursorTimer = 0;
+		cursorAnimate += 0x10;
+		if (cursorAnimate > 0x1C) {
+			cursorAnimate = 0x0C;
+		}
+	}
+
+	if (button(up_but)) {
+		if (cursorY > 7) {
+			cursorY--;
+			pwm_set_freq_duty(6, 493, 25);
+			soundTimer = 10;
+		}				
+	}
+	if (button(down_but)) {
+		if (cursorY < 9) {
+			cursorY++;
+			pwm_set_freq_duty(6, 520, 25);
+			soundTimer = 10;
+		}				
+	}
+	
+	if (button(A_but)) {
+		if (saveSlots[cursorY - 7] == 1) {
+			menuTimer = 0;
+			loadGameFile(cursorY - 7);	
+			loadFlag = true;			//When switch to game mode, this resumes instead of starts new
+			switchGameTo(game);			
+			
+		}
+	}	
+
+	if (button(B_but)) {
+		switchGameTo(titleScreen);
+	}
+
+	if (saveSlots[cursorY - 7] == 0) {		
+		drawText("    NO DATA", 0, 11, false);	
+	}
+	else {
+		drawText("           ", 0, 11, false);
+	}
+
+		
+}
+
+void setupSave() {
+	
+	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
+	
+	fillTiles(0, 0, 31, 15, ' ', 0);			//Black BG
+			
+	setWindow(0, 0);
+			//0123456789ABCDE
+	drawText("    SELECT", 0, 4, false);			
+	drawText("  SAVE SLOT", 0, 5, false);
+
+	drawText("SLOT 1", 6, 7, false);
+	drawText("SLOT 2", 6, 8, false);
+	drawText("SLOT 3", 6, 9, false);
+
+	checkSaveSlots();
+
+	for (int x = 0 ; x < 3 ; x++) {
+		if (saveSlots[x] == 1) {
+			drawTile(4, x + 7, 0x1E, 4, 0);		//Face
+		}	
+		else {
+			drawTile(4, x + 7, 0x1F, 4, 0);		//Empty square
+		}
+	}
+
+	cursorY = 7;
+	cursorAnimate = 0x0C;
+	
+	setButtonDebounce(up_but, true, 1);
+	setButtonDebounce(down_but, true, 1);
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
+		
+	
+}
+
+void saveLogic() {
+	
+	fillTiles(2, 7, 2, 9, ' ', 0);						//Erase arrows
+	
+	drawTile(2, cursorY, cursorAnimate, 0, 0);			//Animated arrow
+
+	if (++cursorTimer > 3) {
+		cursorTimer = 0;
+		cursorAnimate += 0x10;
+		if (cursorAnimate > 0x1C) {
+			cursorAnimate = 0x0C;
+		}
+	}
+
+	if (button(up_but)) {
+		if (cursorY > 7) {
+			cursorY--;
+			pwm_set_freq_duty(6, 493, 25);
+			soundTimer = 10;
+		}				
+	}
+	if (button(down_but)) {
+		if (cursorY < 9) {
+			cursorY++;
+			pwm_set_freq_duty(6, 520, 25);
+			soundTimer = 10;
+		}				
+	}
+	
+	if (button(A_but)) {
+		menuTimer = 0;
+		saveGameFile(cursorY - 7);	
+		switchGameTo(titleScreen);
+	}	
+
+	if (saveSlots[cursorY - 7] == 1) {		
+		drawText("  OVERWRITE?", 0, 11, false);	
+	}
+	else {
+		drawText("            ", 0, 11, false);
+	}
+	
+	
+}
+
+void checkSaveSlots() {
+
+	if (loadFile("/saves/slot_1.sav")) {
+		saveSlots[0] = 1;
+	}
+	else {
+		saveSlots[0] = 0;
+	}
+	closeFile();
+	if (loadFile("/saves/slot_2.sav")) {
+		saveSlots[1] = 1;
+	}
+	else {
+		saveSlots[1] = 0;
+	}
+	closeFile();	
+	if (loadFile("/saves/slot_3.sav")) {
+		saveSlots[2] = 1;
+	}
+	else {
+		saveSlots[2] = 0;
+	}
+	closeFile();	
+	
+}
+
+void saveGameFile(int slot) {
+
+	switch(slot) {		
+		case 0:
+			saveFile("saves/slot_1.sav");
+		break;
+		case 1:
+			saveFile("saves/slot_2.sav");
+		break;		
+		case 2:
+			saveFile("saves/slot_3.sav");
+		break;	
+	}
+
+	writeByte(currentFloor);
+	writeByte(score >> 24);
+	writeByte((score >> 16) & 0xFF);
+	writeByte((score >> 8) & 0xFF);
+	writeByte(score & 0xFF);
+
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		writeByte(apartmentState[x]);
+	}
+	
+	closeFile();
+	
+}
+
+void loadGameFile(int slot) {
+
+	switch(slot) {		
+		case 0:
+			loadFile("saves/slot_1.sav");
+		break;
+		case 1:
+			loadFile("saves/slot_2.sav");
+		break;		
+		case 2:
+			loadFile("saves/slot_3.sav");
+		break;	
+	}
+	
+	currentFloor = readByte();
+	
+	levelScore = 0;	
+	levelScore = (readByte() << 24) | (readByte() << 16) | (readByte() << 8) | readByte();
+
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		apartmentState[x] = readByte();
+	}
+	
+	closeFile();
+	
+}
+
+
+void setupGameOver() {
+
+	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
+
+	fillTiles(0, 0, 31, 15, ' ', 0);			//Black BG
+			
+	setWindow(0, 0);
+			//0123456789ABCDE
+	drawText("   GAME OVER", 0, 2, false);
+
+	drawText("  CONTINUE", 0, 4, false);
+	drawText("  SAVE PROGRESS", 0, 5, false);
+	drawText("  QUIT TO MENU", 0, 6, false);
+
+	cursorY = 4;
+	cursorTimer = 0;
+	cursorAnimate = 0x0C;
+
+	setButtonDebounce(up_but, true, 1);
+	setButtonDebounce(down_but, true, 1);
+
+	displayPause = false;   		//Allow core 2 to draw
+	isDrawn = true;	
+	
+}
+
+void gameOverLogic() {
+
+	fillTiles(1, 4, 1, 6, ' ', 0);					//Erase arrows
+	
+	drawTile(1, cursorY, cursorAnimate, 0, 0);			//Animated arrow
+
+	if (++cursorTimer > 3) {
+		cursorTimer = 0;
+		cursorAnimate += 0x10;
+		if (cursorAnimate > 0x1C) {
+			cursorAnimate = 0x0C;
+		}
+	}
+
+	if (button(up_but)) {
+		if (cursorY > 4) {
+			cursorY--;
+			pwm_set_freq_duty(6, 493, 25);
+			soundTimer = 10;
+		}				
+	}
+	if (button(down_but)) {
+		if (cursorY < 6) {
+			cursorY++;
+			pwm_set_freq_duty(6, 520, 25);
+			soundTimer = 10;
+		}				
+	}
+	
+	if (button(A_but)) {
+		menuTimer = 0;
+		switch(cursorY) {					
+			case 4:		
+				budLives = 3;
+				budPower = 3;
+				budStunned = 0;
+				hallwayBudSpawn = 11;		//If die in hallway, spawns in front of closed elevator
+				switchGameTo(goHallway);				
+			break;
+			
+			case 5:
+				switchGameTo(saveGame);
+			break;
+
+			case 6:
+				switchGameTo(titleScreen);				
+			break;				
+		}		
+	}
+
+
+	
+}
+
+
 void startGame() {
+
+	score = 0;
+	levelScore = 0;
 
 	propDamage = 0;
 	robotKill = 0;
 
 	//currentFloor = 1;			//Setup game here
 	currentCondo = 0;			//Bud hasn't entered a condo
-	budLives = 9;
+	budLives = 2;
 	budPower = 3;
 	hallwayBudSpawn = 0;		//Bud jumps through glass
 
 	budPower = 3;
+	jump = 0;
+	velocikitten = 0;
+
 	budStunned = 0;
 
 	elevatorOpen = false;		//Level starting (if die in hallway, spawn in front of closed elevator)
@@ -837,6 +1218,35 @@ void startGame() {
 	switchGameTo(goHallway);
 
 }
+
+void resumeGame() {
+	
+	propDamage = 0;
+	robotKill = 0;
+
+	score = levelScore;
+
+	currentCondo = 0;			//Bud hasn't entered a condo
+	budLives = 2;
+	budPower = 3;
+	hallwayBudSpawn = 11;		//For a load, spawn in front of elevator (only crash window for new game start)
+
+	budPower = 3;
+	jump = 0;
+	velocikitten = 0;
+
+	budStunned = 0;
+
+	elevatorOpen = false;		//Level starting (if die in hallway, spawn in front of closed elevator)
+	
+	stopWatchClear();
+		
+	breakWindow = false;
+	
+	switchGameTo(goHallway);	
+	
+}
+
 
 void startNewFloor() {
 
@@ -903,7 +1313,7 @@ void jailLogic() {
 		if (--menuTimer == 0) {
 			
 			if (budLives == 0) {
-				//GAME OVER				
+				switchGameTo(gameOver);			
 			}
 			else {
 				budPower = 3;
@@ -1114,6 +1524,8 @@ void condoLogic() {
 
 	stopWatchTick();
 
+	drawSpriteDecimal(score, 80, 0, 0);
+
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
 		if (kittenMessageTimer > 0) {
 				
@@ -1221,6 +1633,7 @@ void setupHallway() {
 		case 0:				//Breaking glass stage 1
 			budSpawned = false;
 			budSpawnTimer = 0;
+			budState = rest;
 			spawnIntoHallway(0, 5, 40);
 			break;
 					
@@ -1338,6 +1751,8 @@ void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartF
 void hallwayLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
 
 	stopWatchTick();
+
+	drawSpriteDecimal(score, 80, 0, 0);
 
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
 		if (kittenMessageTimer > 0) {
@@ -2363,29 +2778,7 @@ void budLogic2() {
 		if (budY > 60) {
 			budY -= 2;
 		}
-
-		// bool centered = true;
 		
-		// if (budX < 52) {
-			// budX++;
-			// centered = false;
-		// }
-		// if (budX > 52) {
-			// budX--;
-			// centered = false;
-		// }
-		// if (budY < 55) {
-			// budY++;
-			// centered = false;
-		// }
-		// if (budY > 55) {
-			// budY--;
-			// centered = false;
-		// }
-		
-		// if (centered == true) {
-			// switchGameTo(goJail);
-		// }		
 		return;
 	}
 
