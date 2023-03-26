@@ -245,11 +245,12 @@ class GBAudio {
         void PlayTrack(uint8_t);
         void StopTrack(uint8_t);
         void PauseTrack(uint8_t);
+		bool IsTrackPlaying(uint8_t);
         uint8_t AddTrack(const byte *track, uint8_t slotNum);
         void SetVolume(uint8_t);
         uint8_t GetVolume();
 
-        byte masterVolume = 4;
+        byte masterVolume = 2;
         byte pulseDutyTable[4] = { 32, 64, 128, 192 };
         byte NESTriangleLUT[256];
         byte NESTriangleRefTable[32] = { 15, 14, 13, 12, 11, 10,  9,  8,  7,  6,  5,  4,  3,  2,  1,  0, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15 };

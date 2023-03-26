@@ -16,6 +16,8 @@
 #include <gameBadgePico.h>
 #include "GBAudio.h"
 
+//BJH MATH PASS 3-26-23
+
 GBAudio::GBAudio()
 {
     int kLUT = 0;
@@ -26,8 +28,10 @@ GBAudio::GBAudio()
     }
 }
 
-void GBAudio::ProcessWaveforms()
+void GBAudio::ProcessWaveforms()				//Called really fast (64us minimum)
 {   
+	//gpio_put(15, 1);
+	
     volatile byte s1 = 0, s2 = 0, tri = 0;
     volatile word noise = 0, dpcm = 0;
 
@@ -38,18 +42,25 @@ void GBAudio::ProcessWaveforms()
 
         s1 += tracks[i].Sqr1.synthesize();
         s2 += tracks[i].Sqr2.synthesize();
-        tri += tracks[i].Triangle.synthesize() * 3;
-        noise += tracks[i].Noise.synthesize() * 2;
+        tri += tracks[i].Triangle.synthesize() << 2;
+        noise += tracks[i].Noise.synthesize() << 1;
         dpcm += tracks[i].DPCM.synthesize();
     }
-    pwm_set_freq_duty(PULSE1, SAMPLE_RATE, NESDACPulseLUT[s1] * masterVolume);
-    pwm_set_freq_duty(PULSE2, SAMPLE_RATE, NESDACPulseLUT[s2] * masterVolume);
-    pwm_set_freq_duty(TRINOISE, SAMPLE_RATE, NESDACTriNoiseDMCLUT[tri + noise] * masterVolume);
-    pwm_set_freq_duty(PCM, SAMPLE_RATE, NESDACTriNoiseDMCLUT[dpcm] * masterVolume);
+	
+	//Special PWM function that uses a constant FREQ for far less math BJH 3-26-23
+    pwm_set_freq_music(0, NESDACPulseLUT[s1] << masterVolume);							//Use powers of 2 for volume = faster than multiply
+    pwm_set_freq_music(1, NESDACPulseLUT[s2] << masterVolume);
+    pwm_set_freq_music(2, NESDACTriNoiseDMCLUT[tri + noise] << masterVolume);
+    pwm_set_freq_music(3, NESDACTriNoiseDMCLUT[dpcm] << masterVolume);	
+	
+	//gpio_put(15, 0);
 }
 
 void GBAudio::ServiceTracks()
 {
+	gpio_put(15, 1);
+	
+	
     for (int i = 0; i < 16; i++)
     {
         if (!tracks[i].loaded) continue;            // Make sure the track is loaded first
@@ -66,44 +77,59 @@ void GBAudio::ServiceTracks()
             }
 
             byte control = tracks[i].ReadNextByte();
-            bool sqr1FFlag = (control & 1);             // Bit 0 = square 1 note present
-            bool sqr2FFlag = (control & 2);             // Bit 1 = square 2 note present 
-            bool triangleFFlag = (control & 4);         // Bit 2 = triangle note present
-            bool sqr1ParamFlag = (control & 8);         // Bit 3 = square 1 parameter present
-            bool sqr2ParamFlag = (control & 16);        // Bit 4 = square 2 parameter present
-            bool noiseParamFlag = (control & 32);       // Bit 5 = noise note present
-            bool triangleActiveFlag = (control & 64);   // Bit 6 = ?
-            bool extendedFlag = (control & 128);        // Bit 7 = Extended noise + DMC data present
+            // bool sqr1FFlag = (control & 1);             // Bit 0 = square 1 note present
+            // bool sqr2FFlag = (control & 2);             // Bit 1 = square 2 note present 
+            // bool triangleFFlag = (control & 4);         // Bit 2 = triangle note present
+            // bool sqr1ParamFlag = (control & 8);         // Bit 3 = square 1 parameter present
+            // bool sqr2ParamFlag = (control & 16);        // Bit 4 = square 2 parameter present
+            // bool noiseParamFlag = (control & 32);       // Bit 5 = noise note present
+            // bool triangleActiveFlag = (control & 64);   // Bit 6 = ?
+            // bool extendedFlag = (control & 128);        // Bit 7 = Extended noise + DMC data present
 
-            if (sqr1FFlag) {
+			if (control == 0) {			//Null line? Don't processs bits
+				continue;
+			}
+
+			//I think we can save a tiny bit of time by NOT copying these bit checks into bools BJH 3-26-23
+			
+			//sqr1FFlag
+            if (control & 0x01) {
                 tracks[i].Sqr1.phaseDelta = tracks[i].ReadNextWord() * PHASE_1HZ;
             }
-            if (sqr2FFlag) {
+			//sqr2FFlag
+            if (control & 0x02) {
                 tracks[i].Sqr2.phaseDelta = tracks[i].ReadNextWord() * PHASE_1HZ;
             }
-            if (triangleFFlag) {
+			//triangleFFlag
+            if (control & 0x04) {
                 tracks[i].Triangle.phaseDelta = tracks[i].ReadNextWord() * PHASE_1HZ;
                 if (tracks[i].Triangle.phaseDelta > 10000) {
                     tracks[i].Triangle.phaseDelta = 0;
                 }
             }
-            if (sqr1ParamFlag) {
+			//sqr1ParamFlag
+            if (control & 0x08) {
                 byte data = tracks[i].ReadNextByte();               // Next byte is square 1 flag
                 tracks[i].Sqr1.volume = data & 0x0F;                // Lower 4 bits is volume
                 tracks[i].Sqr1.duty = pulseDutyTable[data >> 4];    // Upper 4 bits is duty cycle
             }
-            if (sqr2ParamFlag) {
+			//sqr2ParamFlag
+            if (control & 0x10) {
                 byte data = tracks[i].ReadNextByte();               // Next byte is square 2 flag
                 tracks[i].Sqr2.volume = data & 0x0F;                // Lower 4 bits is volume
                 tracks[i].Sqr2.duty = pulseDutyTable[data >> 4];    // Upper 4 bits is duty cycle
             }
-            if (noiseParamFlag) {
+			//noiseParamFlag
+            if (control & 0x20) {
                 byte data = tracks[i].ReadNextByte();                                           // Read the next byte as a noise parameter
                 tracks[i].Noise.volume = data & 0x0F;                                           // Lower 4 bits is volume
                 tracks[i].Noise.bitClockDelta = NESLFSRFrequencyTable[data >> 4] * PHASE_1HZ;   // Upper 4 bits is lookup in noise freq table
             }
-            tracks[i].Triangle.Gate(triangleActiveFlag); 
-            if (extendedFlag) {                             // If there is extended data
+			//triangleActiveFlag
+            tracks[i].Triangle.Gate(control & 0x40); 
+			
+			//extendedFlag
+            if (control & 0x80) {                           // If there is extended data
                 byte data = tracks[i].ReadNextByte();       // Read the next byte as extended data
                 tracks[i].Noise.shortMode = (data >> 7);    // Bit 7 = noise mode
                 bool dmcFlag = ((data & 64) >> 6);          // Bit 6 = DMC flag
@@ -124,6 +150,10 @@ void GBAudio::ServiceTracks()
             }
         }
     }
+	
+	
+	gpio_put(15, 0);
+	
 }
 
 uint8_t GBAudio::AddTrack(const byte *track, uint8_t num)
@@ -163,6 +193,11 @@ void GBAudio::PauseTrack(uint8_t num)
     if (!tracks[num].loaded) return;
 
     tracks[num].playing = !tracks[num].playing;
+}
+
+bool GBAudio::IsTrackPlaying(uint8_t num) {
+	
+	return tracks[num].playing;
 }
 
 uint8_t GBAudio::GetVolume()

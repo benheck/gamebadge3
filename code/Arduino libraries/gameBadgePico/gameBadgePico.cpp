@@ -74,6 +74,9 @@ int audio_pin_slice;
 
 bool backlightOnFlag = false;
 
+int currentAudioPriority = 0;
+
+
 const int notes[] = {
     261, 277, 293, 311, 329, 349, 369, 391, 415, 440, 466, 493
 };
@@ -83,6 +86,10 @@ int indexToGPIO[9] = {7, 11, 9, 13, 21, 5, 4, 3, 2};		//Button index is UDLR SEL
 bool debounce[9] = {false, false, false, false, true, true, true, true, true};		//Index of which buttons have debounce (button must open before it can re-trigger)
 uint8_t debounceStart[9] = {0, 0, 0, 0, 5, 5, 1, 1, 1};								//If debounce, how many frames must button be open before it can re-trigger.
 uint8_t debounceTimer[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};    							//The debounceStart time is copied here, and debounceTimer is what's decrimented
+
+//Used to pre-store GPIO-to-channel numbers for PWM (5th channel reserved for PCM audio wave files)
+uint8_t slice_numbers[4];
+uint8_t chan_nummbers[4];
 
 const struct st7789_config lcd_config = {
     .spi      = PICO_DEFAULT_SPI_INSTANCE,
@@ -104,10 +111,10 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	usb_msc.setUnitReady(true);                                             // MSC is ready for read/write
 	usb_msc.begin();
 
-	Serial.begin(115200);
+	//Serial.begin(115200);
 
 	if (!fatfs.begin(&flash)) {
-		Serial.println("Failed to init files system, flash may need to be formatted");
+		//Serial.println("Failed to init files system, flash may need to be formatted");
 	}
 
 	//Serial.println("Adafruit TinyUSB Mass Storage External Flash example");
@@ -141,6 +148,12 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	
 	pwm_set_gpio_level(14, 128);					//Set PWM base level
 
+			//GPIO , our Channel #
+	setupPWMchannels(6, 0);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	setupPWMchannels(8, 1);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	setupPWMchannels(10, 2);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	setupPWMchannels(12, 3);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	
 
 	for (int x = 0 ; x < 9 ; x++) {				//Setup the 9 GPIO used for controls
 		setGPIObutton(indexToGPIO[x]);									//Init each pin using the index mapping
@@ -180,6 +193,30 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	
 }
 
+void setupPWMchannels(int whichGPIO, int whichChannel) {
+
+
+	slice_numbers[whichChannel] = pwm_gpio_to_slice_num(whichGPIO);
+	chan_nummbers[whichChannel] = pwm_gpio_to_channel(whichGPIO);
+	
+	
+}
+
+void pwm_set_freq_music(int whichChannel, uint8_t duty_cycle) {
+
+	uint slice_num = slice_numbers[whichChannel];			//Do this once, less math
+	uint chan = chan_nummbers[whichChannel];
+
+	pwm_set_clkdiv_int_frac(slice_num, 1, 0);
+	pwm_set_wrap(slice_num, 8000);
+	pwm_set_chan_level(slice_num, chan, (8000 * duty_cycle) / 100);
+	pwm_set_enabled(slice_num, true);
+
+	// return wrap;
+}
+
+
+
 uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d) {
 
 	uint slice_num = pwm_gpio_to_slice_num(gpioNum);
@@ -198,11 +235,6 @@ uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d) {
 	 pwm_set_wrap(slice_num, wrap);
 	 pwm_set_chan_level(slice_num, chan, (wrap * d) / 100);
 	 pwm_set_enabled(slice_num, true);
-	
-	// Serial.print(" s-");		
-	// Serial.print(slice_num, DEC);
-	// Serial.print(" c-");
-	// Serial.println(chan, DEC);
 
 	 return wrap;
 }
@@ -566,7 +598,8 @@ void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap) {
 	}
 	else {
 		while(*text) {
-			nameTable[y][x++] = *text++;			//Just draw the characters from left to write
+			nameTable[y][x] &= 0xFF00;			//Retain attb and color bits
+			nameTable[y][x++] |= *text++;			//Just draw the characters from left to write
 		}
 	}
 
@@ -1107,12 +1140,21 @@ bool isDMAbusy(int whatChannel) {
 	
 }
 
+
+
+
 //Plays a 11025Hz 8-bit mono WAVE file from file system using the PWM function and DMA on GPIO14 (gamebadge channel 4)
-void playAudio(const char* path) {
+void playAudio(const char* path, int newPriority) {
 	
 	if (audioPlaying == true) {			//Only one sound at a time
 		//file.close();
-		stopAudio();
+		
+		if (newPriority >= currentAudioPriority) {
+			stopAudio();
+		}
+		else {
+			return;
+		}
 	}
 	
 	if (!file.open(path, O_RDONLY)) {	//Abort if Don Bot's mercy file isn't found
@@ -1146,7 +1188,10 @@ void stopAudio() {
 
 	file.close();	
 	
+	//Kill interrupts and channels
+	dma_hw->ints0 = (1u << 2);
 	dma_channel_abort(2);			//Kill the other channel
+	dma_hw->ints0 = (1u << 1);
 	dma_channel_abort(1);			//Kill the other channel
 	
 }
@@ -1176,7 +1221,7 @@ bool fillAudioBuffer(int whichOne) {
 
 	//gpio_put(15, 1);
 
-	if (audioSamples < audioBufferSize) {			//Are there fewer samples than that left in the file?
+	if (audioSamples < audioBufferSize) {			//Are there fewer samples than a full buffer size?
 		samplesToLoad = audioSamples;	
 	}
 

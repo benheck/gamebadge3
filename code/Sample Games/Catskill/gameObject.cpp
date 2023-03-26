@@ -73,81 +73,81 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 	int offsetX = 0;
 	int offsetY = 0;
 
-	if (state == 99 && moving == true) {						//Object falling?
-		yPos += animate;
-		if (animate < 8) {
-			animate++;
-		}
-		if (yPos > (119 - (height << 3))) {		//Object hit the floor?
-			state = 100;					//Flag for main logic
-			yPos = 104;						//On floor
-			sheetX = 8 + random(0, 5);		//Turn object to rubble
-			sheetY = 32 + 15;
-			height = 1;						//Same width, height of 1 tile
-			category = 99;					//Set to null type
-		}
-	}
-
+	int tempX = xPos;
 
 	//0= tall robot 1=can robot, 2 = flat robot, 3= dome robot, 4= kitten, 5= greenie (greenies on bud sheet 1)
 	if (category == 0) {						//Gameplay objects?
 		
 		if (type < 4 && moving == true) {		//Evil robuts
 
-			if (state == 200) {					//State = 100 = short circuiting
+			if (state == 200) {					//State 200 = stunned
 				offsetX = width;				//Use facing forward robot
 				
+				int shake = 1;					//Default = very little shake (almost recovered)
+				
+				if (stunTimer > 20) {			//Shakes more early on, when shaking slows down stun time almost up!				
+					shake = 2;
+				}
+				
+				if (stunTimer > 50) {			//Shakes more early on, when shaking slows down stun time almost up!				
+					shake = 3;
+				}				
+	
 				if (animate & 0x01) {			//Swap faces and shake left and right
 
-					xPos -= 2;
+					tempX -= shake;
 
 					//Sprite draw in order so this will appear above the base robot
 					switch(type) {
 						case 0:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
 						break;
 						
 						case 1:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
 						break;
 						
 						case 2:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 0, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
 						break;
 						
 						case 3:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 0, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
 						break;					
 					}
 
 				}
 				else {
-					xPos += 2;
+					tempX += shake;
 					
 					//Sprite draw in order so this will appear above the base robot
 					switch(type) {
 						case 0:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 4, sheetY, width, 3, palette, dir, false);		//Just the blank face
 						break;
 						
 						case 1:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 3, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 3, sheetY + 3, width, 1, palette, dir, false);	//Just the eyes (top row)
 						break;
 						
 						case 2:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 4, sheetY + 2, width, 1, palette, dir, false);	//Just the eyes (top row)
 						break;
 						
 						case 3:
-							drawSprite(xPos - worldX, yPos - worldY, sheetX + 4, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
+							drawSprite(tempX - worldX, yPos - worldY, sheetX + 4, sheetY + 3, width, 2, palette, dir, false);	//Just the eyes (top row)						
 						break;					
 					}
 					
 				}
 				
-				if (++animate > 15) {			//Half second shake, then set flag for explosion/removal
-					state = 201;					
+				if (--stunTimer == 0) {
+					state = 0;
+					turning = false;
+					playAudio("audio/boot.wav", 90);	//Robot has rebooted!
 				}
+				
+				//The above just draws the stunned eyes, fall down and draw the rest of the robot under it
 				
 			}
 			else {
@@ -286,23 +286,23 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 		switch(animate) {		//Animate on 2's
 		
 			case 0:
-				drawSprite(xPos - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
+				drawSprite(tempX - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
 			break;
 			
 			case 1:
-				drawSprite(xPos - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
+				drawSprite(tempX - worldX, yPos - worldY, 6, 48 + 8, 2, 2, 4, dir, false);
 			break;
 			
 			case 2:
-				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 8, 48 + 8, 4, 4, 4, dir, false);
+				drawSprite(tempX - worldX - 8, yPos - worldY - 8, 8, 48 + 8, 4, 4, 4, dir, false);
 			break;
 							
 			case 3:
-				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 8, 48 + 12, 4, 4, 4, dir, false);
+				drawSprite(tempX - worldX - 8, yPos - worldY - 8, 8, 48 + 12, 4, 4, 4, dir, false);
 			break;
 			
 			case 4:
-				drawSprite(xPos - worldX - 8, yPos - worldY - 8, 12, 48 + 12, 4, 4, 4, dir, false);
+				drawSprite(tempX - worldX - 8, yPos - worldY - 8, 12, 48 + 12, 4, 4, 4, dir, false);
 			break;			
 			
 		}
@@ -319,7 +319,7 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 	}
 
 	if (visible == true && category < 100) {
-		drawSprite(xPos - worldX, yPos - worldY, sheetX + offsetX, sheetY + offsetY, width, height, palette, dir, false);		
+		drawSprite(tempX - worldX, yPos - worldY, sheetX + offsetX, sheetY + offsetY, width, height, palette, dir, false);		
 	}
 
 }

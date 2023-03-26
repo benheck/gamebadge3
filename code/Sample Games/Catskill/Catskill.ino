@@ -1,8 +1,10 @@
 #include <gameBadgePico.h>
-//#include "thingObject.h"
+#include <GBAudio.h>
 #include "gameObject.h"
+#include "music.h"
 //Your defines here------------------------------------
-//#include "hardware/pwm.h"
+
+GBAudio music;
 
 struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
@@ -291,6 +293,11 @@ int cutSubAnimate2 = 0;
 int whichScene = 0;					//Which cutscene frame to show
 int explosionCount = 0;
 
+int stunTimeStart = 90;
+
+struct repeating_timer timer60Hz;           // Audio track timer
+struct repeating_timer timerWFGenerator;    // Timer for the waveform generator
+
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -300,15 +307,33 @@ void setup() { //------------------------Core0 handles the file system and game 
 
 	add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
 
+	add_repeating_timer_us(WAVE_TIMER, wavegen_callback, NULL, &timerWFGenerator);   
+    add_repeating_timer_us(AUDIO_TIMER, audio_callback, NULL, &timer60Hz);						// NTSC audio timer
+
+	music.AddTrack(intro, 0);		//Intro
+	//Floors
+	music.AddTrack(stage_1, 1);		//Castlevania 1 Vampire Killer	
+	music.AddTrack(stage_2, 2);		//Mad gears
+	music.AddTrack(stage_3, 3);		//Stream
+	music.AddTrack(stage_4, 4);		//
+	music.AddTrack(stage_5, 5);		//
+	
+	music.AddTrack(wiley, 6);
+	
+	
 }
 
 void setup1() { //-----------------------Core 1 builds the tile display and sends it to the LCD
+
+
+
   
 }
 
 void loop() {	//-----------------------Core 0 handles the main logic loop
 	
 	if (nextFrameFlag == true) {		//Flag from the 30Hz ISR?
+		//gpio_put(15, 1);
 		nextFrameFlag = false;			//Clear that flag		
 		drawFrameFlag = true;			//and set the flag that tells Core1 to draw the LCD
 
@@ -320,12 +345,13 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		}
 			
 		serviceDebounce();				//Debounce buttons
+		//gpio_put(15, 0);
 	}
 
 	if (displayPause == true) {  		//If paused for USB xfer, push START to unpause 
 		if (button(start_but)) {        //Button pressed?
 		  displayPause = false;
-		  Serial.println("LCD DMA UNPAUSED");
+		  //Serial.println("LCD DMA UNPAUSED");
 		  switchGameTo(titleScreen);
 		}    
 	}
@@ -460,7 +486,7 @@ void drawSplashScreen() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;
 	
-	playAudio("audio/gameBadge.wav");		//Splash audio
+	playAudio("audio/gameBadge.wav", 100);		//Splash audio
 	
 }
 
@@ -506,7 +532,7 @@ void gameFrame() {
 		//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
 	
 		serviceAudio();
-		
+
 		//Controls, file access, Wifi etc...
 		
 		while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
@@ -596,6 +622,7 @@ void gameFrame() {
 					
 					case 10:
 						whichScene = 0;
+						music.PlayTrack(0, false);
 						switchGameTo(story);
 					break;
 					
@@ -773,7 +800,7 @@ void drawPauseMenu() {
 	
 	setWindow(0, 0);	
 	
-	Serial.println("LCD DMA PAUSED");
+	//Serial.println("LCD DMA PAUSED");
 	
 	isDrawn = true;
 	displayPause = false;   		//Allow core 2 to draw
@@ -833,6 +860,8 @@ void startNewFloor() {
 
 void setupJail() {
 
+	music.StopTrack(currentFloor);
+
 	fillTiles(0, 0, 31, 15, ' ', 0);			//Black BG
 			
 	setWindow(0, 0);
@@ -846,6 +875,8 @@ void setupJail() {
 }
 
 void jailLogic() {
+
+	drawBudStats();
 
 	drawSprite(40, jailYpos, 8, 16 + 10, 5, 5, 7, false, false);
 
@@ -861,7 +892,7 @@ void jailLogic() {
 	}
 
 	if (jailYpos == 24) {
-		playAudio("audio/jaildoor.wav");
+		playAudio("audio/jaildoor.wav", 100);
 		budLives--;
 	}
 
@@ -876,7 +907,8 @@ void jailLogic() {
 			}
 			else {
 				budPower = 3;
-				
+				jump = 0;
+				velocikitten = 0;
 				switch(lastMap) {
 					
 					case condo:
@@ -1001,6 +1033,10 @@ void setupCondo(int whichFloor, int whichCondo) {
 	kittenMessageTimer = 90;
 
 	budStunned = 0;
+
+	if (music.IsTrackPlaying(currentFloor) == false) {
+		music.PlayTrack(currentFloor, true);
+	}
 	
 }
 
@@ -1259,6 +1295,10 @@ void setupHallway() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;	
 	
+	if (music.IsTrackPlaying(currentFloor) == false) {
+		music.PlayTrack(currentFloor, true);
+	}
+	
 }
 
 void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartFineY) {
@@ -1320,7 +1360,7 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 			velocikitten = 5;
 
 			object[entryWindow].sheetX = 0;			//Break the existing window
-			playAudio("audio/glass_2.wav");
+			playAudio("audio/glass_2.wav", 100);
 
 			int glass = placeObjectInMap(32, 40, 0, 32 + 8, 4, 3, 6, true, 10, 6);		//Spawn broken glass	
 			object[glass].subAnimate = 0;
@@ -1380,17 +1420,39 @@ void objectLogic() {
 	xShake = 0;
 	yShake = 0;
 
-	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level
+	for (int g = 0 ; g < highestObjectIndex ; g++) {	//Scan no higher than # of objects loaded into level SCAN ALL? BJH
 		
 		if (object[g].active) {
 			object[g].scan(worldX + xShake, 0 + yShake);					//Draw object if active, plus logic (in object) Robots move if off-camera
 
+			if (object[g].state == 99) { // && object[g].moving == true) {						//Object falling?
+				object[g].yPos += object[g].animate;
+				
+				if (object[g].animate < 8) {			//Object has to reach full fall speed in order to break or hit a robot
+					object[g].animate++;				//Keep approaching TERMINAL VELOCITY
+				}
+				//else {									//Object can now break
+				if (objectToTile(g) == true && object[g].animate > 4) {				//Scan base of object and see if it hit something solid (as wide as itself)
+				//if (object[g].yPos > (119 - (object[g].height << 3))) {		//Object hit the floor?
+					object[g].state = 100;					//Flag for main logic
+					object[g].yPos &= 0xF8;					//Lob off remainder (tile-aligned)
+					object[g].yPos += ((object[g].height - 1) << 3);	//Smash down to 1 tile high
+					object[g].sheetX = 8 + random(0, 5);		//Turn object to rubble
+					object[g].sheetY = 32 + 15;
+					object[g].height = 1;						//Same width, height of 1 tile
+					object[g].category = 99;					//Set to null type
+				}
+				//}
+
+			}
+
+
 			if (object[g].state == 100) {				//Object hit floor?
 				if (object[g].type == 50) {				//Chandelier? Big sound
-					playAudio("audio/glass_2.wav");				
+					playAudio("audio/glass_2.wav", 100);				
 				}
 				else {
-					playAudio("audio/glass_loose.wav");
+					playAudio("audio/glass_loose.wav", 50);
 				}
 				fallListRemove(g);						//Remove it from active lists (also kills object)
 				object[g].state = 101;					//Null state (rubble on floor, still active object)
@@ -1403,12 +1465,12 @@ void objectLogic() {
 						
 						switch(object[g].state) {
 						
-							case 200:				//Short circuit
-							
+							case 200:						//Stunned, null state so robot can't hurt Bud during stun
+								object[g].animate++;		//Could do this in object but I wanted something in this case
 								break;
-								
+						
 							case 201:
-								playAudio("audio/explode.wav");
+								playAudio("audio/explode.wav", 100);
 								object[g].state = 202;
 								object[g].animate = 0;
 								object[g].subAnimate = 0;
@@ -1436,7 +1498,7 @@ void objectLogic() {
 						
 						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {
 							score += 50;
-							playAudio("audio/thankYou.wav");	
+							playAudio("audio/thankYou.wav", 99);	
 							object[g].xPos += 4;			//Center rescuse kitten on sitting kitten
 							object[g].yPos -= 4;
 							object[g].state = 200;			//Rescue balloon
@@ -1452,7 +1514,7 @@ void objectLogic() {
 						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
 							score += 100;
 							object[g].active = 0;
-							playAudio("audio/greenie.wav");
+							playAudio("audio/greenie.wav", 90);
 							if (++budPower > 3) {
 								budPower = 3;
 							}
@@ -1472,9 +1534,9 @@ void objectLogic() {
 					}
 				}
 
-				if (budState == swiping) {	//Bud can only swipe inert objects
+				if (budState == swiping) {	//Bud is swiping?
 					
-					if (object[g].category > 0 && object[g].state == 0) {	//Bud can only swipe inert objects
+					if (object[g].category > 0 && object[g].state == 0) {	//Bud swipes inert objects
 						
 						if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
 							
@@ -1482,49 +1544,61 @@ void objectLogic() {
 							
 							fallListAdd(g);							//Add this item to the fall list
 							
-							playAudio("audio/slap.wav");	
+							playAudio("audio/slap.wav", 40);	
 							object[g].state = 99;					//Falling
 							object[g].animate = 1;
 						}
 						
 					}
 					
-					if (object[g].category == 0 && object[g].type == 4 && object[g].state == 0) {	//If bud hits a kitten...
+					if (object[g].category == 0) {						//Gameplay object?
 						
-						if (object[g].xSentryLeft == 0 && object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
+						if (object[g].type == 4 && object[g].state == 0) {	//If bud hits a kitten...
 							
-							score += 10;						//Score hack!
-							
-							object[g].xSentryLeft = 40;			//Cooldown for swat sounds
-							
-							kittenMeow = random(0, 4);
-							
-							switch(kittenMeow) {
-								case 0:
-									playAudio("audio/kitmeow0.wav");
-								break;
+							if (object[g].xSentryLeft == 0 && object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
 								
-								case 1:
-									playAudio("audio/kitmeow1.wav");
-								break;
+								score += 10;						//Score hack!
 								
-								case 2:
-									playAudio("audio/kitmeow2.wav");
-								break;
+								object[g].xSentryLeft = 40;			//Cooldown for swat sounds
 								
-								case 3:
-									playAudio("audio/kitmeow3.wav");
-								break;
-							
-							}
+								kittenMeow = random(0, 4);
+								
+								switch(kittenMeow) {
+									case 0:
+										playAudio("audio/kitmeow0.wav", 30);
+									break;
+									
+									case 1:
+										playAudio("audio/kitmeow1.wav", 30);
+									break;
+									
+									case 2:
+										playAudio("audio/kitmeow2.wav", 30);
+									break;
+									
+									case 3:
+										playAudio("audio/kitmeow3.wav", 30);
+									break;
+								
+								}
 
-						}
+							}
+							
+						}							
 						
-					}					
-					
-					
-					
-					
+						if (object[g].type < 4 && object[g].state == 200) {	//If a robot is in stun state
+
+							if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {		//Punch landed? You're terminated!
+								
+								object[g].state = 201;			//State 100 = Stunned
+								object[g].animate = 0;
+
+							}								
+
+						}						
+						
+					}
+						
 				}	
 				
 				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art by jumping through it
@@ -1532,7 +1606,7 @@ void objectLogic() {
 					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {		
 						propDamage++;
 						fallListAdd(g);							//Add this item to the fall list						
-						playAudio("audio/slap.wav");	
+						playAudio("audio/slap.wav", 30);	
 						object[g].state = 99;					//Falling
 						object[g].animate = 1;
 					}
@@ -1551,6 +1625,8 @@ void objectLogic() {
 //Elevator (stage complete)-----------------------------------------------
 
 void setupElevator() {
+	
+	music.StopTrack(currentFloor);			//End this floor's music (new floor = new music)
 	
 	stopAudio();
 	
@@ -1613,7 +1689,7 @@ void elevatorLogic() {
 				pwm_set_freq_duty(6, 520, 25);
 				bonusTimer = 0;
 				if (kittenCountLevel < 1) {
-					playAudio("audio/cash.wav");
+					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 2;
 				}
@@ -1636,7 +1712,7 @@ void elevatorLogic() {
 				pwm_set_freq_duty(6, 520, 25);
 				bonusTimer = 0;
 				if (robotKill < 1) {
-					playAudio("audio/cash.wav");
+					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 3;
 				}
@@ -1658,7 +1734,7 @@ void elevatorLogic() {
 				pwm_set_freq_duty(6, 520, 25);
 				bonusTimer = 0;
 				if (propDamage < 1) {
-					playAudio("audio/cash.wav");
+					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 4;
 				}	
@@ -1704,7 +1780,7 @@ void elevatorLogic() {
 			if (seconds < 0) {
 				seconds = 59;
 				if (--minutes < 0) {
-					playAudio("audio/cash.wav");
+					playAudio("audio/cash.wav", 100);
 					bonusPhase = 5;
 					score += levelBonus;
 					levelBonus = 0;
@@ -1800,7 +1876,7 @@ void setupStory() {
 			fillTiles(0, 10, 14, 14, ' ', 3);
 	
 			cutAnimate = 0;
-			menuTimer = 130;
+			menuTimer = 140;
 			break;	
 
 			
@@ -1823,6 +1899,9 @@ void setupStory() {
 			
 			worldX = 96;
 			menuTimer = 65;
+			
+			//music.StopTrack(0);		//Kill intro track
+			//music.PlayTrack(15);	//Interlude
 			break;
 		
 	}
@@ -1920,9 +1999,9 @@ void storyLogic() {
 			if (++cutSubAnimate == 20 && explosionCount < 5) {
 				cutSubAnimate = 0;
 				budX = random(72, 96);
-				budY = random(16, 56);
+				budY = random(8, 44);
 				cutSubAnimate2 = 8;
-				playAudio("audio/bomb.wav");
+				playAudio("audio/bomb.wav", 100);
 				explosionCount++;
 			}
 				
@@ -1979,20 +2058,20 @@ void storyLogic() {
 		case 4:		
 			menuTimer--;
 			
-			if (menuTimer == 119) {
+			if (menuTimer == 139) {
 				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
 					        //0123456789ABCDE
 					drawText("WE ARE GETTING", 0, 11, false);
 					drawText(" REPORTS...", 0, 12, false);
-					playAudio("audio/kitmeow0.wav");
+					playAudio("audio/kitmeow0.wav", 100);
 			}
-			if (menuTimer == 70) {
+			if (menuTimer == 80) {
 				fillTiles(0, 10, 14, 14, ' ', 3);			//Clear text area, white palette
 					        //0123456789ABCDE
 					drawText(" THAT INNOCENT", 0, 11, false);
 					drawText("  KITTENS ARE", 0, 12, false);
 					drawText("TRAPPED INSIDE!", 0, 13, false);	
-					playAudio("audio/kitmeow1.wav");					
+					playAudio("audio/kitmeow1.wav", 100);					
 			}			
 			if (menuTimer == 0) {
 				whichScene = 5;
@@ -2022,6 +2101,7 @@ void storyLogic() {
 			}
 			
 			if (menuTimer == 0) {
+				music.StopTrack(0);		//Kill intro track
 				switchGameTo(game);
 			}
 			
@@ -2089,9 +2169,10 @@ void budDamage() {
 	budPower--;			//Dec power
 	
 	if (budPower == 0) {	
+		music.StopTrack(currentFloor);				
 		budStunned = 10;				//Prevent object re-triggers during death
 		menuTimer = 30;					//One second
-		playAudio("audio/buddead.wav");
+		playAudio("audio/buddead.wav", 100);
 		budState = dead;
 		movingObjects(false);			//Freeze objects
 		return;		
@@ -2099,7 +2180,7 @@ void budDamage() {
 	else {
 		budStunned = 10;				//15 frame stun knockback then 1 sec invinc
 		budStunnedDir = !budDir;
-		playAudio("audio/budhit.wav");
+		playAudio("audio/budhit.wav", 100);
 		budState = damaged;
 		budFrame = 0;
 	}
@@ -2173,7 +2254,7 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 					
 			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
 		
-			if (object[g].animate == 8) {			//Object must be falling max speed to kill a robot
+			if (object[g].animate > 4) {			//Object must be falling at at least half speed to kill a robot
 			
 				bool hit = false;
 				
@@ -2190,10 +2271,11 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 				}
 							
 				if (hit == true) {
-					playAudio("audio/glass_1.wav");	//Just the start of this (probably mix with object smash)
+					playAudio("audio/glass_1.wav", 90);	//Just the start of this (probably mix with object smash)
 					fallingObjectState[x] = false;		//Remove it from fall list
 					object[g].active = false;			//Destory falling object				
-					object[index].state = 200;			//Short circuit then blow up robot
+					object[index].state = 200;			//Short circuit stun robot
+					object[index].stunTimer = stunTimeStart;
 					object[index].animate = 0;
 				}			
 			}
@@ -2211,6 +2293,27 @@ void movingObjects(bool state) {
 		}
 	}	
 	
+}
+
+int objectToTile(int g) {		//Returns the tile flags nearest the given global world x y position. Allows objects to land on platforms other than the floor
+	
+	int x = object[g].xPos >> 3;		//Pixels to tiles
+	int y = object[g].yPos >> 3;
+
+	int edgeCount = 0;
+	
+	for (int i = 0 ; i < object[g].width ; i++) {			//Object must hit an edge along its entire width to land (so edge of counter it keeps going)	
+		if ((condoMap[y + (object[g].height - 1)][x + i] & 0xF800) != 0) {			//Plat or block bits?
+			edgeCount++;									//Inc count
+		}		
+	}
+	
+	if (edgeCount == object[g].width) {
+		return true;
+	}
+	
+	return false;
+
 }
 
 
@@ -2433,10 +2536,7 @@ void budLogic2() {
 					budFrame = 0;
 				}					
 			}
-			if (--budStunned == 0) {
-				budState = rest;
-				budBlink = 30;			//After the stun 1 sec invincible
-			}			
+			//stunned count was here
 			break;
 
 		case exiting:		
@@ -2457,7 +2557,7 @@ void budLogic2() {
 						budState = rest;
 						budDir = false;
 						apartmentState[currentCondo - 1] = 0x80;				//Set door closed, apt clear
-						playAudio("audio/doorOpen.wav");
+						playAudio("audio/doorOpen.wav", 90);
 						drawHallwayDoorClosed(doorTilePos[currentCondo - 1], currentCondo);
 						//populateDoor(doorTilePos[currentCondo - 1], currentCondo, false);		//CLOSE THE DOOR ALEX THERE'S A DRAFT!				
 						redrawMapTiles();
@@ -2468,7 +2568,7 @@ void budLogic2() {
 					budFrame++;					
 					if (budFrame == 5) {
 						budVisible = true;					//He's visible once the doors open
-						playAudio("audio/elevDing.wav");
+						playAudio("audio/elevDing.wav", 100);
 						elevatorOpen = true;				//Doors open, 10 frames on 2's open
 						drawHallwayElevator(64);
 						redrawMapTiles();					
@@ -2508,6 +2608,14 @@ void budLogic2() {
 			break;
 
 	}
+
+	if (budStunned > 0) {		
+		if (--budStunned == 0) {
+			budState = rest;
+			budBlink = 30;			//After the stun 1 sec invincible
+		}			
+	}
+
 
 	if (moveSuppress == false) {			//If Bud isn't frozen (enter/exit/dead) then player can move him
 		
@@ -2655,7 +2763,7 @@ void budLogic2() {
 		}
 
 		if (button(A_but)) {
-			//playAudio("audio/hitModem.wav");
+			//playAudio("audio/hitModem.wav", 90);
 			
 			// levelComplete = true;
 			// elevatorOpen = true;
@@ -2683,7 +2791,7 @@ void budLogic2() {
 
 				if (button(up_but)) {
 					apartmentState[temp] |= 0x40;								//Set the door open bit
-					playAudio("audio/doorOpen.wav");
+					playAudio("audio/doorOpen.wav", 100);
 					drawHallwayDoorOpen(doorTilePos[temp], 0);
 					//populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
 					redrawMapTiles();
@@ -2709,7 +2817,7 @@ void budLogic2() {
 			if (elevatorOpen == true) {							//Ready for the next level?
 
 				if (button(up_but)) {
-					playAudio("audio/elevDing.wav");
+					playAudio("audio/elevDing.wav", 100);
 					budState = entering;
 					budFrame = 0;				
 				}
@@ -2759,7 +2867,7 @@ bool budMoveLeftC(int speed) {
 			else {
 				if (kittenMessageTimer == 0) {
 					kittenMessageTimer = 60;	
-					playAudio("audio/taunt.wav");
+					playAudio("audio/taunt.wav", 100);
 				}
 			}
 		}
@@ -3585,8 +3693,8 @@ void updateMapFileName() {				//Call thise in edit/game mode before calling save
 	//condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
 	//condoMap[8][3] = 0x80 + (fileNameCondo - 48);	
 	
-	Serial.print("Game level filename:");
-	Serial.println(mapFileName);
+	//Serial.print("Game level filename:");
+	//Serial.println(mapFileName);
 
 }
 
@@ -3596,7 +3704,7 @@ void updateMapFileNameEdit() {				//Call thise in edit/game mode before calling 
 	mapFileName[14] = fileNameCondo;
 
 	if (editType == true) {				//Condo? Change the numbers on the open door on the left
-		Serial.print("CONDO MODE: ");
+		//Serial.print("CONDO MODE: ");
 		condoMap[8][2] = 0x80 + (fileNameFloor - 48);		//Update the number on the open door
 		condoMap[8][3] = 0x80 + (fileNameCondo - 48);		
 	}
@@ -3610,8 +3718,8 @@ void updateMapFileNameEdit() {				//Call thise in edit/game mode before calling 
 		}
 	}
 
-	Serial.print("Edit filename:");
-	Serial.println(mapFileName);
+	//Serial.print("Edit filename:");
+	//Serial.println(mapFileName);
 
 }
 
@@ -3667,17 +3775,29 @@ void saveLevel() {
 		}
 	}
 	
-	for (int x = 0 ; x < maxThings ; x++) {		//Robot scan (next priority)
+	for (int x = 0 ; x < maxThings ; x++) {		//Tall Robot scan (next priority)
 		if (object[x].active == true) {
 		
 			if (object[x].category == 0) {		//Gameplay object?		
-				if (object[x].type < 4) {		//Evil robot? Save
+				if (object[x].type == 0) {		//Tall robot? Save these first (so robots on counters/tables etc appear behind them)
 					saveObject(x);
 				}			
 			}
 
 		}
 	}	
+	
+	for (int x = 0 ; x < maxThings ; x++) {		//Robot scan (next priority)
+		if (object[x].active == true) {
+		
+			if (object[x].category == 0) {		//Gameplay object?		
+				if (object[x].type > 0 && object[x].type < 4) {		//All robots other than the tall ones? Save next
+					saveObject(x);
+				}			
+			}
+
+		}
+	}		
 
 	for (int x = 0 ; x < maxThings ; x++) {		//Kitten (below robots)
 		if (object[x].active == true) {
@@ -3724,13 +3844,13 @@ void loadLevel() {
 	
 	if (loadFile(mapFileName) == false) {	
 		makeMessage("FILE NOT FOUND");
-		Serial.println("FILE NOT FOUND");
+		//Serial.println("FILE NOT FOUND");
 		messageTimer = 30;
 		redrawEditWindow();	
 		return;		
 	}
 	
-	Serial.println("LOADING FILE");
+	//Serial.println("LOADING FILE");
 	//File exists, so load it!
 	
 	clearObjects();		
@@ -3747,8 +3867,8 @@ void loadLevel() {
 		
 	}	
 
-	Serial.print(mapWidth * 15);
-	Serial.println(" TILES LOADED");
+	//Serial.print(mapWidth * 15);
+	//Serial.println(" TILES LOADED");
 
 	if (readByte() == 128) {				//128 = end of tile data. Old files don't have this so skip objects if not found
 
@@ -3756,8 +3876,8 @@ void loadLevel() {
 
 		highestObjectIndex = objectCount;			//Set this as our scan limit
 
-		Serial.print(objectCount, DEC);
-		Serial.println(" OBJECTS LOADED");
+		//Serial.print(objectCount, DEC);
+		//Serial.println(" OBJECTS LOADED");
 	
 		//ADD KITTEN BUBBLE SORT?
 	
@@ -3771,7 +3891,7 @@ void loadLevel() {
 		closeFile();									
 		redrawEditWindow();		
 		makeMessage("LOADED");
-		Serial.println("LOAD COMPLETE");
+		//Serial.println("LOAD COMPLETE");
 		messageTimer = 30;
 		redrawEditWindow();					
 	}
@@ -3779,7 +3899,7 @@ void loadLevel() {
 		closeFile();	
 		redrawEditWindow();		
 		makeMessage("LOAD ERROR");
-		Serial.println("LOAD ERROR");
+		//Serial.println("LOAD ERROR");
 		messageTimer = 30;
 		redrawEditWindow();			
 	}
@@ -4252,8 +4372,8 @@ void placeObjectInMap() {
 		}				
 	}
 	
-	Serial.print("Placing object #");
-	Serial.println(objectIndexNext);
+	//Serial.print("Placing object #");
+	//Serial.println(objectIndexNext);
 	
 	object[objectIndexNext].active = true;
 	object[objectIndexNext].xPos = (editWindowX << 3) + drawXfine;
@@ -4361,8 +4481,8 @@ void editorDrawObjects() {
 				if (object[g].hitBox((editWindowX << 3) + (drawX << 3), drawY << 3, (editWindowX << 3) + (drawX << 3) + 8, (drawY << 3) + 8) == true) {	//Does the 8x8 reticle fall within the object bounds?
 					object[g].active = 0;	
 					eraseFlag = false;
-					Serial.print("Erasing object #");
-					Serial.println(g);
+					//Serial.print("Erasing object #");
+					//Serial.println(g);
 				}
 		
 			}
@@ -4778,7 +4898,7 @@ void saveObject(int which) {
 	writeBool(object[which].moving);					
 	writeBool(object[which].extraY);
 			
-	writeByte(object[which].extraA);	
+	writeByte(object[which].stunTimer);	
 	writeByte(object[which].extraB);	
 	writeByte(object[which].extraC);	
 	writeByte(object[which].extraD);	
@@ -4820,7 +4940,7 @@ void loadObject(int which) {
 	object[which].moving = readBool();				
 	object[which].extraY = readBool();
 			
-	object[which].extraA = readByte();		
+	object[which].stunTimer = readByte();		
 	object[which].extraB = readByte();		
 	object[which].extraC = readByte();		
 	object[which].extraD = readByte();		
@@ -4851,3 +4971,12 @@ void clearMessage() {
 
 }	
 
+bool wavegen_callback(struct repeating_timer *t) {
+    music.ProcessWaveforms();
+    return true;
+}
+
+bool audio_callback(struct repeating_timer *t) {
+    music.ServiceTracks();
+    return true;
+}

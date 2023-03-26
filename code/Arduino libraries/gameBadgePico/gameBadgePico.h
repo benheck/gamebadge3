@@ -10,6 +10,10 @@
 	void setGPIObutton(int which);
 	void setButtonDebounce(int which, bool useDebounce, uint8_t frames);
 	
+	void setupPWMchannels(int whichGPIO, int whichChannel);
+	void pwm_set_freq_music(int whichChannel, uint8_t duty_cycle);
+	
+	
 	uint32_t pwm_set_freq_duty(int gpioNum, uint32_t f, int d);
 	
 	void backlight(bool state);
@@ -57,7 +61,7 @@
 	void updatePaletteRGB(int position, char r, char g, char b);
 	void convertBitplanePattern(uint16_t position, unsigned char *lowBitP, unsigned char *highBitP);
 
-	void playAudio(const char* path);
+	void playAudio(const char* path, int newPriority);
 	void stopAudio();
 	void serviceAudio();
 	bool fillAudioBuffer(int whichOne);
