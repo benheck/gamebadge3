@@ -6,17 +6,17 @@
 
 GBAudio music;
 
-struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
+//struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
 
 char testX = 0;
 
 bool firstFrame = false;
-bool displayPause = true;
+bool displayPauseState = true;
 
-bool paused = true;							//Player pause, also you can set pause=true to pause the display while loading files/between levels
-bool nextFrameFlag = false;					//The 30Hz IRS sets this flag, Core0 Loop responds to it
-bool drawFrameFlag = false;					//When Core0 Loop responses to nextFrameFlag, it sets this flag so Core1 will know to render a frame
-bool frameDrawing = false;					//Set TRUE when Core1 is drawing the display. Core0 should wait for this to clear before accessing video memory
+bool paused = true;											//Player pause, also you can set pause=true to pause the display while loading files/between levels
+volatile int nextFrameFlag = 0;								//The 30Hz IRS incs this, Core0 Loop responds when it reaches 2 or greater
+bool drawFrameFlag = false;									//When Core0 Loop responses to nextFrameFlag, it sets this flag so Core1 will know to render a frame
+bool frameDrawing = false;									//Set TRUE when Core1 is drawing the display. Core0 should wait for this to clear before accessing video memory
 
 //Your game variables here:
 int xPos = 0;
@@ -128,11 +128,8 @@ int lastAdded = 0xFF;
 bool gameActive = false;
 bool isDrawn = false;													//Flag that tells new state it needs to draw itself before running logic
 
-enum stateMachine { bootingMenu, splashScreen };		//State machine of the badge (boot, wifi etc)
-stateMachine badgeState = bootingMenu;
-
-enum stateMachineGame { titleScreen, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
-stateMachineGame gameState = titleScreen;
+enum stateMachineGame { bootingMenu, splashScreen, titleScreen, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
+stateMachineGame gameState = bootingMenu;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
 stateMachineEdit editState = tileDrop;
@@ -312,6 +309,8 @@ bool loadFlag = false;
 struct repeating_timer timer60Hz;           // Audio track timer
 struct repeating_timer timerWFGenerator;    // Timer for the waveform generator
 
+int gameLoopState = 0;
+
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -319,10 +318,10 @@ void setup() { //------------------------Core0 handles the file system and game 
 
 	menuTimer = 0;
 
-	add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
+	//add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
 
 	add_repeating_timer_us(WAVE_TIMER, wavegen_callback, NULL, &timerWFGenerator);   
-    add_repeating_timer_us(AUDIO_TIMER, audio_callback, NULL, &timer60Hz);						// NTSC audio timer
+    add_repeating_timer_us(HERTZ60, sixtyHz_callback, NULL, &timer60Hz);						// NTSC audio timer
 
 	music.AddTrack(intro, 0);		//Intro
 	//Floors
@@ -351,131 +350,65 @@ void setup1() { //-----------------------Core 1 builds the tile display and send
 
 void loop() {	//-----------------------Core 0 handles the main logic loop
 	
-	if (nextFrameFlag == true) {		//Flag from the 30Hz ISR?
-		//gpio_put(15, 1);
-		nextFrameFlag = false;			//Clear that flag		
-		drawFrameFlag = true;			//and set the flag that tells Core1 to draw the LCD
+	if (nextFrameFlag == 2) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
+	
+		nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)
+		LCDsetDrawFlag();				//Tell core1 to start drawing a frame
 
-		if (gameActive == true) {
-			gameFrame();				//Now do our game logic in Core0			
+		if (gameLoopState == 0) {		//If the last game logic loop has finished, start the next
+			gameLoopState = 2;			
 		}
-		else {
-			menuFrame();				//Or menu logic
-		}
-			
+
 		serviceDebounce();				//Debounce buttons
-		//gpio_put(15, 0);
 	}
 
-	if (displayPause == true) {  		//If paused for USB xfer, push START to unpause 
+	if (displayPauseState == true) {  		//If paused for USB xfer, push START to unpause 
 		if (button(start_but)) {        //Button pressed?
-		  displayPause = false;
-		  //Serial.println("LCD DMA UNPAUSED");
+		  displayPause(false);
 		  switchGameTo(titleScreen);
 		}    
 	}
 
+	gameLoopLogic();					//Check this every loop frame
   
 }
 
 void loop1() { //------------------------Core 1 handles the graphics blitter. Core 0 can process non-graphics game logic while a screen is being drawn
 
-	if (drawFrameFlag == true) {			//Flag set to draw display?
+	// if (nextFrameFlag == 2) {			//Counter flag from the 30Hz ISR
+		// gpio_put(15, 1);
+		// nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)
+		// sendFrame();
+		// gpio_put(15, 0);
+	// }
 
-		drawFrameFlag = false;				//Clear flag
+	LCDlogic();
+
+
+
+	// if (drawFrameFlag == true) {			//Flag set to draw display?
+		// gpio_put(15, 1);
+		// drawFrameFlag = false;				//Clear flag
 		
-		if (displayPause == true) {			//If display is paused, don't draw (return)
-			return;
-		}		
+		// // if (displayPause == true) {			//If display is paused, don't draw (return)
+			// // return;
+		// // }		
 
-		frameDrawing = true;				//Set flag that we're drawing a frame. Core0 should avoid accessing video memory if this flag is TRUE
-		sendFrame();						//Render the sprite-tile frame and send to LCD via DMA
-		frameDrawing = false;				//Clear flag. Core0 is now free to access screen memory (I guess this core could as well?)
+		// frameDrawing = true;				//Set flag that we're drawing a frame. Core0 should avoid accessing video memory if this flag is TRUE
+		// sendFrame();						//Render the sprite-tile frame and send to LCD via DMA
+		// frameDrawing = false;				//Clear flag. Core0 is now free to access screen memory (I guess this core could as well?)
+		// gpio_put(15, 0);
+	// }
 
-	}
+
 
 }
 
-bool timer_isr(struct repeating_timer *t) {				//Every 33ms, set the flag that it's time to draw a new frame (it's possible system might miss one but that's OK)
-	nextFrameFlag = true;
-	return true;
-}
+void displayPause(bool state) {
 
+	displayPauseState = state;	
+	pauseLCD(state);
 
-//Splash screens, boot and menus-----------------------------
-void menuFrame() {		//This is called 30 times a second. It either calls the main top menu state machine or the game state machine
-
-	if (displayPause == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
-		
-		while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
-			delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
-		}
-		//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
-	
-		serviceAudio();
-		
-		//Controls, file access, Wifi etc...
-		
-		while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
-			delayMicroseconds(1);
-		}
-		//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
-	}
-
-	switch(badgeState) {
-	
-		case bootingMenu:							//Special type of load that handles files not being present yet
-			if (menuTimer == 65534) {				//Let one frame be drawn to show the LOAD USB FILES message then...
-				displayPause = true;				//Spend most of the time NOT drawing the screen so files can load easier
-			}
-
-			if (menuTimer > 0) {					//If timer active, decrement
-				--menuTimer;				
-			}
-			
-			if (menuTimer == 0) {					//First boot, or did timer reach 0?
-				if (loadRGB("UI/NEStari.pal")) {				//Try and load master pallete from root dir (only need to load this once)
-					//Load success? Load the rest
-					loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
-					loadPattern("UI/logofont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
-					switchMenuTo(splashScreen);					//Progress to splashscreen					
-				}
-				else {								//No files? Make USB file load prompt using flash text patterns and wait for user reset
-					displayPause = false;   		//Just draw this one
-					menuTimer = 65535;				//Try again in 36 minutes - or more likely, after user presses RESET after file xfer :)
-					setWindow(0, 0);
-				}							
-			}
-
-			break;
-			
-		case splashScreen:
-			if (isDrawn == false) {
-				drawSplashScreen();
-			}	
-			if (--menuTimer == 0) {					//Dec timer and goto main menu after timeout
-				fillTiles(0, 0, 14, 14, 0, 3);		
-				switchGameTo(titleScreen);
-			}
-			break;
-		
-	}
-	
-	if (soundTimer > 0) {
-		if (--soundTimer == 0) {
-			pwm_set_freq_duty(6, 0, 0);
-		}
-	}
-
-}
-
-void switchMenuTo(stateMachine x) {		//Switches state of menu
-
-	gameActive = false;
-	displayPause = true;
-	badgeState = x;		
-	isDrawn = false;
-	
 }
 
 void drawSplashScreen() {
@@ -502,65 +435,103 @@ void drawSplashScreen() {
 
 	setWindow(0, 0);
 	menuTimer = 60;					//Splash Screen for 2 second
-	displayPause = false;   		//Allow core 2 to draw
+	//displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);
 	isDrawn = true;
 	
 	playAudio("audio/gameBadge.wav", 100);		//Splash audio
 	
 }
 
-void drawMainMenu() {
+void gameLoopLogic() {
 
-	loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
-	loadPattern("UI/menuFont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)
-
-	fillTiles(0, 0, 14, 14, ' ', 3);			//CLS
+	switch(gameLoopState) {
 	
-	drawText("MAIN MENU", 3, 0, false);
-
-	drawText("Run GAME", 2, 4, false);
-	drawText("Run GAME", 2, 5, false);
-	drawText("USB load", 2, 6, false);
+		case 0:
+			//Do nothing
+		break;
+		
+		case 1:		
+			gpio_put(15, 1);
+			serviceAudio();						//Service PCM audio file streaming while Core1 draws the screens (gives Core0 something to do while we wait for vid mem access)
+			gameLoopState = 2;
+			gpio_put(15, 0);
+		break;		
+		
+		case 2:									//Done with our audio, now waiting for frame to finish rendering (we can start our logic during the final DMA)
+			if (getRenderStatus() == false) {	//Wait for core 1 to finish drawing frame
+				gameLoopState = 3;				//Jump to next check
+			}
+		break;
+		
+		case 3:									//Frame started?
+			gpio_put(15, 1);
+			gameFrame();	
+			gameLoopState = 0;					//Done, wait for next frame flag
+			gpio_put(15, 0);
+		break;		
+				
+	}
 	
-	drawText("A=SELECT", 3, 14, false);
-
-	cursorX = 1;
-	cursorY = 4;
-	cursorAnimate = 0x02;
-	cursorTimer = 0;
-
-	setWindow(0, 0);
-
-	setButtonDebounce(up_but, true, 1);			//Set debounce on d-pad for menu select
-	setButtonDebounce(down_but, true, 1);
-	setButtonDebounce(left_but, true, 1);
-	setButtonDebounce(right_but, true, 1);
-	
-	displayPause = false;   		//Allow core 2 to draw
-	isDrawn = true;
 	
 }
 
+
 void gameFrame() {
 	
-	if (displayPause == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
+	// if (displayPauseState == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
 		
-		while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
-			delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
-		}
-		//OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
+		// // while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
+			// // delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
+		// // }
+		// //OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
 	
-		serviceAudio();
+		//serviceAudio();
 
-		//Controls, file access, Wifi etc...
+		// //Controls, file access, Wifi etc...
 		
-		while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
-			delayMicroseconds(1);
-		}
-		//OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
-	}
+		// // while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
+			// // delayMicroseconds(1);
+		// // }
+		// //OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
+	// }
 
 	switch(gameState) {
+
+		case bootingMenu:							//Special type of load that handles files not being present yet
+			if (menuTimer == 65534) {				//Let one frame be drawn to show the LOAD USB FILES message then...
+				displayPause(true);				//Spend most of the time NOT drawing the screen so files can load easier
+			}
+
+			if (menuTimer > 0) {					//If timer active, decrement
+				--menuTimer;				
+			}
+			
+			if (menuTimer == 0) {					//First boot, or did timer reach 0?
+				if (loadRGB("UI/NEStari.pal")) {				//Try and load master pallete from root dir (only need to load this once)
+					//Load success? Load the rest
+					loadPalette("UI/basePalette.dat");          //Load palette colors from a YY-CHR file. Can be individually changed later on
+					loadPattern("UI/logofont.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
+					switchGameTo(splashScreen);					//Progress to splashscreen					
+				}
+				else {								//No files? Make USB file load prompt using flash text patterns and wait for user reset
+					displayPause(false);   		//Just draw this one
+					menuTimer = 65535;				//Try again in 36 minutes - or more likely, after user presses RESET after file xfer :)
+					setWindow(0, 0);
+				}							
+			}
+
+			break;
+			
+		case splashScreen:
+			if (isDrawn == false) {
+				drawSplashScreen();
+			}	
+			if (--menuTimer == 0) {					//Dec timer and goto main menu after timeout
+				fillTiles(0, 0, 14, 14, 0, 3);		
+				switchGameTo(titleScreen);
+			}
+			break;
 				
 		case titleScreen:
 			if (isDrawn == false) {
@@ -762,7 +733,7 @@ void gameFrame() {
 				drawPauseMenu();
 			}
 			else {
-				displayPause = true;			//and then pause on next frame
+				displayPause(true);			//and then pause on next frame
 			}	
 			break;	
 						
@@ -782,8 +753,7 @@ void gameFrame() {
 
 void switchGameTo(stateMachineGame x) {		//Switches state of game
 
-	gameActive = true;
-	displayPause = true;
+	displayPause(true);
 	gameState = x;		
 	isDrawn = false;
 	
@@ -833,7 +803,7 @@ void drawTitleScreen() {
 	cursorAnimate = 0x8A;
 					
 	isDrawn = true;	
-	displayPause = false;
+	displayPause(false);
 	
 	music.PlayTrack(9, false);
 	
@@ -857,7 +827,7 @@ void drawPauseMenu() {
 	//Serial.println("LCD DMA PAUSED");
 	
 	isDrawn = true;
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	
 }
 
@@ -901,7 +871,7 @@ void setupLoad() {
 	setButtonDebounce(up_but, true, 1);
 	setButtonDebounce(down_but, true, 1);
 
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
 		
 	music.PlayTrack(10, true);	
@@ -1005,7 +975,7 @@ void setupSave() {
 	setButtonDebounce(up_but, true, 1);
 	setButtonDebounce(down_but, true, 1);
 
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
 		
 	music.PlayTrack(10, true);
@@ -1200,7 +1170,7 @@ void setupGameOver() {
 	setButtonDebounce(up_but, true, 1);
 	setButtonDebounce(down_but, true, 1);
 
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
 	
 	music.PlayTrack(11, false);
@@ -1372,7 +1342,7 @@ void setupJail() {
 
 	jailYpos = -80;
 
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;		
 	
 }
@@ -1434,7 +1404,6 @@ void jailLogic() {
 
 
 //Condo---------------------------------------------------
-
 void setupCondo(int whichFloor, int whichCondo) {
 	
 	mapWidth = condoWidth;
@@ -1463,7 +1432,6 @@ void setupCondo(int whichFloor, int whichCondo) {
 	updateMapFileName();
 	loadLevel();
 	
-
 	int windowStartCoarseX = 0;
 
 	int budStartCoarseX = 1;
@@ -1511,9 +1479,7 @@ void setupCondo(int whichFloor, int whichCondo) {
 		xLevelStripRight -= 120;
 	}	
 	
-
 	redrawMapTiles();
-
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == true) { // && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
@@ -1533,7 +1499,7 @@ void setupCondo(int whichFloor, int whichCondo) {
 	}
 
 	isDrawn = true;	
-	displayPause = false;
+	displayPause(false);
 	
 	kittenMessageTimer = 90;
 
@@ -1712,7 +1678,6 @@ void condoLogic() {
 
 
 //Hallway-------------------------------------
-
 void setupHallway() {
 
 	mapWidth = hallwayWidth;
@@ -1809,10 +1774,10 @@ void setupHallway() {
 
 	redrawMapTiles();					//Reload what's visible
 
-	robotsToSpawn = 4; //currentFloor;	//How many robots spawn in the hallway (same as floor #)
+	robotsToSpawn = currentFloor;	//How many robots spawn in the hallway (same as floor #)
 	robotsSpaceTimer = 90;			//Time between robot spawns, in ticks
 
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
 	
 	if (music.IsTrackPlaying(currentFloor) == false) {
@@ -2169,9 +2134,7 @@ void objectLogic() {
 	
 }
 
-
 //Elevator (stage complete)-----------------------------------------------
-
 void setupElevator() {
 	
 	music.StopTrack(currentFloor);			//End this floor's music (new floor = new music)
@@ -2213,7 +2176,7 @@ void setupElevator() {
 	minutes = 1;
 
 	isDrawn = true;	
-	displayPause = false;
+	displayPause(false);
 
 	
 }
@@ -2342,7 +2305,6 @@ void elevatorLogic() {
 	
 }
 
-
 void setupStory() {
 	
 	mapWidth = hallwayWidth;			//We used hallway mode to draw most of the story screens	
@@ -2443,7 +2405,7 @@ void setupStory() {
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 	setWindow(0, 0);
 	isDrawn = true;	
-	displayPause = false;
+	displayPause(false);
 		
 	
 }
@@ -2661,7 +2623,6 @@ void drawStoryScreen(int which) {
 	
 }	
 
-
 void nextFloor() {
 
 	if (++currentFloor == 7) {
@@ -2709,7 +2670,7 @@ void drawBudStats() {
 void budDamage() {
 
 	budPower--;			//Dec power
-	
+
 	if (budPower == 0) {	
 		music.StopTrack(currentFloor);				
 		budStunned = 10;				//Prevent object re-triggers during death
@@ -2859,6 +2820,7 @@ int objectToTile(int g) {		//Returns the tile flags nearest the given global wor
 }
 
 
+//Bud logic---------------------------------------
 void budLogic2() {
 
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
@@ -3936,7 +3898,7 @@ void setupEdit() {
 	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
 	
 	editDisableCursor = false;
-	displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;		
 	
 }
@@ -5491,12 +5453,16 @@ void clearMessage() {
 
 }	
 
+
+//Game callbacks------------------------------------------------------------
+
 bool wavegen_callback(struct repeating_timer *t) {
     music.ProcessWaveforms();
     return true;
 }
 
-bool audio_callback(struct repeating_timer *t) {
-    music.ServiceTracks();
+bool sixtyHz_callback(struct repeating_timer *t) {
+    music.ServiceTracks();	
+	nextFrameFlag += 1;								//When main loop sees this reach 2, run 30Hz game logic	
     return true;
 }

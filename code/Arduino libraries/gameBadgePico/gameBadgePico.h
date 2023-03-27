@@ -31,9 +31,20 @@
 	void setWindow(uint8_t x, uint8_t y);
 	void setWindowSlice(int whichRow, uint8_t x);
 	void setCoarseYRollover(int topRow, int bottomRow);
+	
+	//NEW 3-27-23
+	void pauseLCD(bool state);
+	bool getRenderStatus();
+	void LCDlogic();
+	void lcdRenderRow();
+	void LCDsetDrawFlag();
+	void dmaLCD(int whatChannel, const void* data, int whatSize);
+	
+	//OLD AND BUSTED
 	void sendFrame();
 	void dmaX(int whatChannel, const void* data, int whatSize);
 	bool isDMAbusy(int whatChannel);
+
 
 	void drawTile(int xPos, int yPos, uint16_t whatTile, char whatPalette, int flags = 0x00);
 	void drawTile(int xPos, int yPos, uint16_t tileX, uint16_t tileY, char whatPalette, int flags = 0x00);
@@ -77,7 +88,7 @@
 	uint8_t readByte();
 	bool readBool();
 	void closeFile();
-	
+	void eraseFile(const char* path);
 	
 	
 	int32_t msc_read_cb (uint32_t lba, void* buffer, uint32_t bufsize);

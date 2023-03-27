@@ -131,6 +131,10 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 	gpio_init(26);								//Audio amp enable (active HIGH)
 	gpio_set_dir(26, GPIO_OUT);
 	gpio_put(26, 1);	
+
+	gpio_init(27);								//External SPI CS or extra scope pin
+	gpio_set_dir(27, GPIO_OUT);
+	gpio_put(27, 0);
 	
 	gpio_set_function(14, GPIO_FUNC_PWM);
 	audio_pin_slice = pwm_gpio_to_slice_num(14);	
@@ -982,6 +986,241 @@ void setCoarseYRollover(int topRow, int bottomRow) {		//Sets at which row the na
 	
 }
 
+int lcdState = 0;
+bool localFrameDrawFlag = false;
+volatile bool lcdDMAcomplete = false;
+bool isRendering = false;					//Render status flag 0 = null true = render in progress false = render complete
+
+int whichBuffer = 0;						//We have 2 row buffers. We draw one, send via DMA, and draw next while DMA is running
+int lastDMA = 5;							//Round-robin the DMA's
+
+uint8_t fineYsubCount = 0;
+uint8_t fineYpointer; // = winYfine;
+uint8_t coarseY; // = winY;	
+uint16_t *sp; // = &spriteBuffer[0];
+uint8_t renderRow = 0;
+
+uint8_t scrollYflag = 0;
+
+bool LCDupdatePause = false;		
+
+void pauseLCD(bool state) {					//Prevents the LCD from drawing a new frame (hold on old frame) Useful for loading new graphics/game transitions
+	
+	LCDupdatePause = state;
+	
+}
+
+bool getRenderStatus() {							//Core0 calls this to see if rendering is done, and when done Core0 runs logic	
+	return isRendering;
+}
+
+//State machine version of old sendFrame
+void LCDlogic() {
+
+	switch(lcdState) {
+	
+		case 0:										//Waiting for frame draw flag
+			if (localFrameDrawFlag == true) {		//Flag set?
+				localFrameDrawFlag = false;			//Always respond by clearing flag (even if we don't draw a new one because paused)			
+				if (LCDupdatePause == false) {		//LCD paused? Don't render a new frame (if pause set during frame it will complete, then wait for flag clear before next)
+					lcdState = 1;					//Advance to next state					
+				}
+			}
+		break;
+		
+		case 1:										//Start LCD frame
+			gpio_put(27, 1);				//For scope timing
+			isRendering = true;
+			st7789_setAddressWindow(0, 0, 240, 240);	//Set entire LCD for drawing
+			st7789_ramwr();                       		//Switch to RAM writing mode dawg	
+
+			fineYsubCount = 0;						//This is stuff we used to setup in sendframe
+			fineYpointer = winYfine;
+			coarseY = winY;	
+			sp = &spriteBuffer[0];    				  //Use pointer so less math later on
+			renderRow = 0;
+			scrollYflag = 0;
+			isRendering = 1;
+			lcdState = 2;
+		break;
+	
+		case 2:											//Render 1 row (240x16 pixels, or 120x8 fat pixels)
+			lcdRenderRow();
+			lcdState = 3;								//Wait for DMA channel ready (since 14/15 times it will be sending the previous row)
+		break;
+		
+		case 3:
+			if (dma_channel_is_busy(lastDMA) == false) {		//DMA done sending previous row?
+
+				if (++lastDMA > 6) {							//Toggle channels 5 and 6. Using same channel in series causes issues, not sure why? (something not cleared in time?)
+					lastDMA = 5;
+				}
+		
+				dmaLCD(lastDMA, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
+
+				if (++whichBuffer > 1) {							//Switch up buffers, we will draw the next while the prev is being DMA'd to LCD
+					whichBuffer = 0;
+				}				
+				
+				if (++renderRow == 15) {				//LCD done?
+					isRendering = false;					//Render complete, wait for next draw flag (this keeps Core0 from drawing in screen
+					lcdState = 0;	
+					gpio_put(27, 0);
+				}
+				else {
+					lcdState = 2;						//Not done? Render next row and wait for DMA
+				}
+				
+			}
+		break;
+			
+	}
+	
+	
+}
+
+void lcdRenderRow() {
+	
+	uint16_t temp;
+	uint16_t tempPalette;	
+	
+	uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
+
+	//gpio_put(27, 1);
+
+	if (winYJumpList[renderRow] & 0x80) {								//Flag to jump to a different row in the nametable? (like for a status bar)
+		coarseY = winYJumpList[renderRow] & 0x1F;						//Jump to row indicated by bottom 5 bits								
+		fineYpointer = 0;										//Reset fine pointer so any following rows are static
+	}
+	else {														//Not a jump line?
+		if (scrollYflag == 0) {									//Is this first line with fine Y scroll enabled? (under a status bar at the top perhaps)
+			scrollYflag = 1;									//Set flag so this only happens once
+			fineYpointer = winYfine;							//Get Y scroll value
+			coarseY = winY;
+		}
+	}
+
+	for (int yLine = 0 ; yLine < 16; yLine++) {         			//Each char line is 16 pixels in ST7789 memory, so we send each vertical line twice
+
+		uint8_t fineXPointer = winXfine[coarseY];							//Copy the fine scrolling amount so we can use it as a byte pointer when scanning in graphics
+		uint16_t *tilePointer = &nameTable[coarseY][winX[coarseY]];			//Get pointer for this character line
+		uint8_t winXtemp = winX[coarseY];									//Temp copy for finding edge of tilemap and rolling back over
+		temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];	//Get first line of pattern		
+		temp <<= (fineXPointer << 1);							//Pre-shift for horizontal scroll
+
+		tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
+		if (yLine & 0x01) {										//Drawing odd line on LCD/second line of fat pixels?							
+			sp -= 120;											//Revert sprite buffer point to draw every line twice
+			for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
+			
+				uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
+				if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...	
+					uint16_t tempShort = paletteRGB[tempPalette | twoBits];	//Add those 2 bits to palette index to get color (0-3)
+					//uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					*pointer++ = tempShort;						//...twice (fat pixels)
+					*pointer++ = tempShort;		
+				}
+				else{                							//Else draw sprite pixel...
+					*pointer++ = *sp;							//..twice (fat pixels)
+					*pointer++ = *sp;	
+				}
+				*sp = spriteAlphaColor;									//When rendering the doubled sprite line, erase it so it's empty for next frame
+				sp++;
+				temp <<= 2;										//Shift for next 2 bit color pair
+
+				if (++fineXPointer == 8) {						//Advance fine scroll count and jump to next char if needed
+					fineXPointer = 0;
+					tilePointer++;								//Advance tile pointer in memory
+					if (++winXtemp == 32) {						//Rollover edge of tiles X?
+						tilePointer -= 32;						//Roll tile X pointer back 32
+					}				
+					temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];		//Fetch next line from pattern table
+					tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
+				}				
+			}				
+		}
+		else {
+			for (int xChar = 0 ; xChar < 120 ; xChar++) {      	//15 characters wide
+			
+				uint8_t twoBits = temp >> 14;					//Smash this down into 2 lowest bits
+				if (*sp == spriteAlphaColor) {							//Transparent sprite pixel? Draw background color...
+					uint16_t tempShort = paletteRGB[tempPalette | twoBits];	//Add those 2 bits to palette index to get color (0-3)
+					//uint16_t tempShort = paletteRGB[(*tilePointer >> 8) | twoBits];	//Add those 2 bits to palette index to get color (0-3)				
+					*pointer++ = tempShort;						//...twice (fat pixels)
+					*pointer++ = tempShort;		
+				}
+				else{                							//Else draw sprite pixel...
+					*pointer++ = *sp;							//..twice (fat pixels)
+					*pointer++ = *sp;	
+				}
+				sp++;
+				temp <<= 2;										//Shift for next 2 bit color pair
+
+				if (++fineXPointer == 8) {						//Advance fine scroll count and jump to next char if needed
+					fineXPointer = 0;
+					tilePointer++;								//Advance tile pointer in memory
+					if (++winXtemp == 32) {						//Rollover edge of tiles X?
+						tilePointer -= 32;						//Roll tile X pointer back 32
+					}
+					temp = patternTable[((*tilePointer & 0x00FF) << 3) + fineYpointer];		//Fetch next line from pattern table
+					tempPalette = (*tilePointer & 0x700) >> 6;				//Palette is lower 3 bits of upper word. Mask and shift 6 to the right to get the palette index 0bxxxPPPbb P = palette pointer b = bits (the 4 colors per palette)
+
+				}				
+			}								
+		}
+
+		if (++fineYsubCount > 1) {
+			fineYsubCount = 0;		
+			if (++fineYpointer == 8) {						//Did we pass a character edge with the fine Y scroll?
+				fineYpointer = 0;							//Reset scroll and advance character
+				if (++coarseY > winYrollover) {
+					coarseY = winYreset;
+				}				
+			}					
+		}
+	}
+
+	//gpio_put(27, 0);
+
+	//Row drawn, now wait for DMA to open up
+	
+}
+
+void LCDsetDrawFlag() {					//Call this to tell the LCD core to draw next frame
+
+	localFrameDrawFlag = true;
+	
+}
+
+//Used by sendFrame to send 240x16 pixels to the ST7789 one row at a time. As the previous row is DMA'd to LCD the next row is drawn - efficient!
+void dmaLCD(int whatChannel, const void* data, int whatSize) {
+
+    dma_channel_unclaim(whatChannel);
+    dma_channel_config c = dma_channel_get_default_config(whatChannel);
+	channel_config_set_high_priority(&c, true);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+    channel_config_set_dreq(&c, spi_get_dreq(spi0, true));
+    
+    dma_channel_configure(whatChannel, &c,
+                          &spi_get_hw(spi0)->dr, // write address
+                          data, // read address
+                          whatSize, // element count (each element is of size transfer_data_size)
+                          false); // don't start yet
+
+    dma_start_channel_mask((1u << whatChannel));
+
+	// if (whatChannel == 5) {
+		// gpio_put(27, 1);
+	// }
+	// else {
+		// gpio_put(15, 1);	
+	// }
+
+}
+
+
 //Renders tiles and sprites and DMA's the data to the ST7789 LCD. Takes about 15ms. Core0 can do other stuff while this happens, as long as it doesn't access video memory (else tearing can occur)
 void sendFrame() {								//This is executed by Core1. Core0 can do other stuff during this time
 	
@@ -1003,7 +1242,15 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 	for (int row = 0 ; row < 15 ; row++) {				  //15 rows of 8x8 fat pixels (16x16)
 
 		uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
-		//gpio_put(15, 1);											//Scope testing row render time
+		
+		if (whichBuffer == 0) {
+			gpio_put(15, 1);
+		}
+		else {
+			gpio_put(27, 1);
+		}
+		
+													//Scope testing row render time
 
 		if (winYJumpList[row] & 0x80) {								//Flag to jump to a different row in the nametable? (like for a status bar)
 			coarseY = winYJumpList[row] & 0x1F;						//Jump to row indicated by bottom 5 bits								
@@ -1099,9 +1346,10 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 			}
 		}
 
-		//gpio_put(15, 0);
-
-		dmaX(0, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
+		gpio_put(15, 0);
+		gpio_put(27, 0);
+		
+		dmaX(5, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
 
 		if (++whichBuffer > 1) {							//Switch up buffers, we will draw the next while the prev is being DMA'd to LCD
 			whichBuffer = 0;
@@ -1116,6 +1364,7 @@ void dmaX(int whatChannel, const void* data, int whatSize) {
 
     dma_channel_unclaim(whatChannel);
     dma_channel_config c = dma_channel_get_default_config(whatChannel);
+	channel_config_set_high_priority(&c, true);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
     channel_config_set_dreq(&c, spi_get_dreq(spi0, true));
     
@@ -1133,15 +1382,6 @@ void dmaX(int whatChannel, const void* data, int whatSize) {
 	// irq_set_enabled(DMA_IRQ_0, true);      
 
 }
-
-bool isDMAbusy(int whatChannel) {
-
-	return dma_channel_is_busy(whatChannel);
-	
-}
-
-
-
 
 //Plays a 11025Hz 8-bit mono WAVE file from file system using the PWM function and DMA on GPIO14 (gamebadge channel 4)
 void playAudio(const char* path, int newPriority) {
@@ -1262,7 +1502,7 @@ void dmaAudio() {
 
     dma_channel_unclaim(1);
 	
-    dma_channel_config c0 = dma_channel_get_default_config(1);	
+    dma_channel_config c0 = dma_channel_get_default_config(1);
     channel_config_set_transfer_data_size(&c0, DMA_SIZE_32);
     channel_config_set_read_increment(&c0, true);
     channel_config_set_write_increment(&c0, false);	
@@ -1286,7 +1526,7 @@ void dmaAudio() {
 
     dma_channel_unclaim(2);
 	
-    dma_channel_config c1 = dma_channel_get_default_config(2);	
+    dma_channel_config c1 = dma_channel_get_default_config(2);
     channel_config_set_transfer_data_size(&c1, DMA_SIZE_32);
     channel_config_set_read_increment(&c1, true);
     channel_config_set_write_increment(&c1, false);	
@@ -1420,6 +1660,12 @@ void closeFile() {									//Closes the active file
 	
 }
 
+void eraseFile(const char* path) {
+
+	file.open(path, O_WRITE | O_CREAT);				//Open file for writing	
+	file.remove();	
+
+}
 
 //Callbacks for the USB Mass Storage Device-----------------------------------------------
 int32_t msc_read_cb (uint32_t lba, void* buffer, uint32_t bufsize) {
