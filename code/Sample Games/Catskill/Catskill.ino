@@ -356,7 +356,7 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		LCDsetDrawFlag();				//Tell core1 to start drawing a frame
 
 		if (gameLoopState == 0) {		//If the last game logic loop has finished, start the next
-			gameLoopState = 2;			
+			gameLoopState = 1;			
 		}
 
 		serviceDebounce();				//Debounce buttons
@@ -448,7 +448,7 @@ void gameLoopLogic() {
 	switch(gameLoopState) {
 	
 		case 0:
-			//Do nothing
+			//Do nothing (is set to 1 externally)
 		break;
 		
 		case 1:		
@@ -470,7 +470,8 @@ void gameLoopLogic() {
 			gameLoopState = 0;					//Done, wait for next frame flag
 			gpio_put(15, 0);
 		break;		
-				
+		
+		
 	}
 	
 	
@@ -1404,6 +1405,7 @@ void jailLogic() {
 
 
 //Condo---------------------------------------------------
+
 void setupCondo(int whichFloor, int whichCondo) {
 	
 	mapWidth = condoWidth;
@@ -1432,6 +1434,7 @@ void setupCondo(int whichFloor, int whichCondo) {
 	updateMapFileName();
 	loadLevel();
 	
+
 	int windowStartCoarseX = 0;
 
 	int budStartCoarseX = 1;
@@ -1479,7 +1482,9 @@ void setupCondo(int whichFloor, int whichCondo) {
 		xLevelStripRight -= 120;
 	}	
 	
+
 	redrawMapTiles();
+
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == true) { // && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
@@ -1678,6 +1683,7 @@ void condoLogic() {
 
 
 //Hallway-------------------------------------
+
 void setupHallway() {
 
 	mapWidth = hallwayWidth;
@@ -1774,7 +1780,7 @@ void setupHallway() {
 
 	redrawMapTiles();					//Reload what's visible
 
-	robotsToSpawn = currentFloor;	//How many robots spawn in the hallway (same as floor #)
+	robotsToSpawn = 20; //currentFloor;	//How many robots spawn in the hallway (same as floor #)
 	robotsSpaceTimer = 90;			//Time between robot spawns, in ticks
 
 	displayPause(false);   		//Allow core 2 to draw
@@ -2134,7 +2140,9 @@ void objectLogic() {
 	
 }
 
+
 //Elevator (stage complete)-----------------------------------------------
+
 void setupElevator() {
 	
 	music.StopTrack(currentFloor);			//End this floor's music (new floor = new music)
@@ -2304,6 +2312,7 @@ void elevatorLogic() {
 	
 	
 }
+
 
 void setupStory() {
 	
@@ -2623,6 +2632,7 @@ void drawStoryScreen(int which) {
 	
 }	
 
+
 void nextFloor() {
 
 	if (++currentFloor == 7) {
@@ -2669,7 +2679,9 @@ void drawBudStats() {
 
 void budDamage() {
 
-	budPower--;			//Dec power
+	//budPower--;			//Dec power
+
+	budDir = !budDir;
 
 	if (budPower == 0) {	
 		music.StopTrack(currentFloor);				
@@ -2820,7 +2832,6 @@ int objectToTile(int g) {		//Returns the tile flags nearest the given global wor
 }
 
 
-//Bud logic---------------------------------------
 void budLogic2() {
 
 	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
