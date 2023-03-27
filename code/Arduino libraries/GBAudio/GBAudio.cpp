@@ -53,10 +53,10 @@ void GBAudio::ProcessWaveforms()				//Called really fast (64us minimum)
     }
 	
 	//Special PWM function that uses a constant FREQ for far less math BJH 3-26-23
-    pwm_set_freq_music(0, NESDACPulseLUT[s1] * masterVolume);
-    pwm_set_freq_music(1, NESDACPulseLUT[s2] * masterVolume);
-    pwm_set_freq_music(2, NESDACTriNoiseDMCLUT[tri + noise] * masterVolume);
-    pwm_set_freq_music(3, NESDACTriNoiseDMCLUT[dpcm] * masterVolume);	
+    pwm_set_freq_music(0, NESDACPulseLUT[s1] * 8);
+    pwm_set_freq_music(1, NESDACPulseLUT[s2] * 8);						//This sounds best with 33k resistors BJH 3-27-23
+    pwm_set_freq_music(2, NESDACTriNoiseDMCLUT[tri + noise] * 2);
+    pwm_set_freq_music(3, NESDACTriNoiseDMCLUT[dpcm]);	
 	
 	gpio_put(15, 0);
 }

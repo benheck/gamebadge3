@@ -233,9 +233,7 @@ mapNames lastMap = null;				//Store currentMap here when Bud Dies, since Jail is
 
 int highestObjectIndex = 0;				//Counts up as a level loads. When running logic/collision checks, don't search past this
 
-int kittenTotal = 0;					//# of kittens per level
-int kittenCount = 0;					//How many player has recused per level
-int kittenCountLevel = 0;				//How many kittens per level (inc'd on condo exit)
+
 int kittenMessageTimer = 0;
 
 int budDeath = 0;						//If set, move Bud to center of screen then switch to KITTEN JAIL!!!
@@ -274,8 +272,19 @@ bool gameplayPaused = false;
 
 long score = 0;
 long levelScore = 0;				//What your score was upon entering the level (for saves)
-long propDamage = 0;
-int robotKill = 0;
+
+int kittenCount = 0;				//How many player has recused per level
+int kittenTotal = 0;				//Total per game (added on level win)
+int kittenFloor = 0;				//Total per floor (added to on condo clear)		
+int kittenToRescue = 0;				//How many to rescue per floor
+
+int propDamage = 0;					//Per condo
+int propDamageTotal = 0;			//Total per game (added on level win)
+int propDamageFloor = 0;			//Total per floor (added to on condo clear)
+
+int robotKill = 0;					//Per condo
+int robotKillTotal = 0;				//Total per game (added on level win)
+int robotKillFloor = 0;				//Total per floor (added to on condo clear)
 
 int bonusPhase = 0;
 int bonusTimer = 0;
@@ -324,6 +333,11 @@ void setup() { //------------------------Core0 handles the file system and game 
 	music.AddTrack(stage_5, 5);		//
 	
 	music.AddTrack(wiley, 6);
+	
+	music.AddTrack(titleMusic, 9);
+	music.AddTrack(saveLoad, 10);
+	music.AddTrack(game_over, 11);
+	music.AddTrack(ding, 15);
 	
 	
 }
@@ -606,28 +620,31 @@ void gameFrame() {
 			if (button(up_but)) {
 				if (cursorY > 9) {
 					cursorY--;
-					pwm_set_freq_duty(6, 493, 25);
+					music.PlayTrack(15);
+					//pwm_set_freq_duty(6, 493, 25);
 					soundTimer = 10;
 				}				
 			}
 			if (button(down_but)) {
 				if (cursorY < 12) {
 					cursorY++;
-					pwm_set_freq_duty(6, 520, 25);
+					music.PlayTrack(15);
+					//pwm_set_freq_duty(6, 520, 25);
 					soundTimer = 10;
 				}				
 			}
 			
 			if (button(A_but)) {
 				menuTimer = 0;
+				music.StopTrack(9);				//In case title music is playing
 				switch(cursorY) {					
-					case 9:
+					case 9:					
 						loadFlag = false;				//NEW GAME				
-						switchGameTo(game);
+						//switchGameTo(game);
 						//GO CUTSCENE
-						// whichScene = 0;
-						// music.PlayTrack(0, false);
-						// switchGameTo(story);						
+						whichScene = 0;
+						music.PlayTrack(0, false);
+						switchGameTo(story);						
 					break;
 					
 					case 10:
@@ -818,6 +835,8 @@ void drawTitleScreen() {
 	isDrawn = true;	
 	displayPause = false;
 	
+	music.PlayTrack(9, false);
+	
 }
 
 void drawPauseMenu() {
@@ -872,6 +891,10 @@ void setupLoad() {
 		}
 	}
 
+	drawText("A = LOAD", 3, 12, false);
+	drawText("B = MENU", 3, 13, false);	
+	drawText("C = ERASE", 3, 14, false);
+	
 	cursorY = 7;
 	cursorAnimate = 0x0C;
 	
@@ -881,6 +904,7 @@ void setupLoad() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;	
 		
+	music.PlayTrack(10, true);	
 	
 }
 
@@ -901,20 +925,23 @@ void loadLogic() {
 	if (button(up_but)) {
 		if (cursorY > 7) {
 			cursorY--;
-			pwm_set_freq_duty(6, 493, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
 	}
 	if (button(down_but)) {
 		if (cursorY < 9) {
 			cursorY++;
-			pwm_set_freq_duty(6, 520, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
 	}
 	
 	if (button(A_but)) {
 		if (saveSlots[cursorY - 7] == 1) {
+			music.StopTrack(10);
 			menuTimer = 0;
 			loadGameFile(cursorY - 7);	
 			loadFlag = true;			//When switch to game mode, this resumes instead of starts new
@@ -924,7 +951,15 @@ void loadLogic() {
 	}	
 
 	if (button(B_but)) {
+		music.StopTrack(10);
 		switchGameTo(titleScreen);
+	}
+	
+	if (button(C_but)) {	
+		if (saveSlots[cursorY - 7] == 1) {
+			eraseSaveSlots(cursorY - 7);
+			switchGameTo(loadGame);
+		}
 	}
 
 	if (saveSlots[cursorY - 7] == 0) {		
@@ -973,6 +1008,7 @@ void setupSave() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;	
 		
+	music.PlayTrack(10, true);
 	
 }
 
@@ -993,19 +1029,22 @@ void saveLogic() {
 	if (button(up_but)) {
 		if (cursorY > 7) {
 			cursorY--;
-			pwm_set_freq_duty(6, 493, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
 	}
 	if (button(down_but)) {
 		if (cursorY < 9) {
 			cursorY++;
-			pwm_set_freq_duty(6, 520, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
 	}
 	
 	if (button(A_but)) {
+		music.StopTrack(10);
 		menuTimer = 0;
 		saveGameFile(cursorY - 7);	
 		switchGameTo(titleScreen);
@@ -1047,6 +1086,25 @@ void checkSaveSlots() {
 	
 }
 
+void eraseSaveSlots(int which) {
+
+	switch(which) {
+		
+		case 0:
+			eraseFile("/saves/slot_1.sav");
+		break;
+		case 1:
+			eraseFile("/saves/slot_2.sav");
+		break;		
+		case 2:
+			eraseFile("/saves/slot_3.sav");
+		break;
+
+	}
+	
+}
+
+
 void saveGameFile(int slot) {
 
 	switch(slot) {		
@@ -1067,9 +1125,16 @@ void saveGameFile(int slot) {
 	writeByte((score >> 8) & 0xFF);
 	writeByte(score & 0xFF);
 
-	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
-		writeByte(apartmentState[x]);
-	}
+	writeByte((kittenTotal >> 8) & 0xFF);
+	writeByte(kittenTotal & 0xFF);
+	writeByte((robotKillTotal >> 8) & 0xFF);
+	writeByte(robotKillTotal & 0xFF);
+	writeByte((propDamageTotal >> 8) & 0xFF);
+	writeByte(propDamageTotal & 0xFF);	
+
+	// for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		// writeByte(apartmentState[x]);
+	// }
 	
 	closeFile();
 	
@@ -1094,8 +1159,18 @@ void loadGameFile(int slot) {
 	levelScore = 0;	
 	levelScore = (readByte() << 24) | (readByte() << 16) | (readByte() << 8) | readByte();
 
+	kittenTotal = 0;
+	kittenTotal = (readByte() << 8) | readByte();
+	
+	robotKillTotal = 0;
+	robotKillTotal = (readByte() << 8) | readByte();
+	
+	propDamageTotal = 0;
+	propDamageTotal = (readByte() << 8) | readByte();	
+
+
 	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
-		apartmentState[x] = readByte();
+		apartmentState[x] = 0;
 	}
 	
 	closeFile();
@@ -1128,6 +1203,8 @@ void setupGameOver() {
 	displayPause = false;   		//Allow core 2 to draw
 	isDrawn = true;	
 	
+	music.PlayTrack(11, false);
+	
 }
 
 void gameOverLogic() {
@@ -1147,19 +1224,24 @@ void gameOverLogic() {
 	if (button(up_but)) {
 		if (cursorY > 4) {
 			cursorY--;
-			pwm_set_freq_duty(6, 493, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
 	}
 	if (button(down_but)) {
 		if (cursorY < 6) {
 			cursorY++;
-			pwm_set_freq_duty(6, 520, 25);
+			music.PlayTrack(15);
+			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
 	}
 	
 	if (button(A_but)) {
+		
+		music.StopTrack(11);
+		
 		menuTimer = 0;
 		switch(cursorY) {					
 			case 4:		
@@ -1191,7 +1273,14 @@ void startGame() {
 	levelScore = 0;
 
 	propDamage = 0;
+	propDamageFloor = 0;
+	propDamageTotal = 0;	
 	robotKill = 0;
+	robotKillFloor = 0;
+	robotKillTotal = 0;	
+	kittenCount = 0;
+	kittenFloor = 0;
+	kittenTotal = 0;
 
 	//currentFloor = 1;			//Setup game here
 	currentCondo = 0;			//Bud hasn't entered a condo
@@ -1222,8 +1311,12 @@ void startGame() {
 void resumeGame() {
 	
 	propDamage = 0;
+	propDamageFloor = 0;
 	robotKill = 0;
-
+	robotKillFloor = 0;
+	kittenCount = 0;
+	kittenFloor = 0;
+	
 	score = levelScore;
 
 	currentCondo = 0;			//Bud hasn't entered a condo
@@ -1428,12 +1521,14 @@ void setupCondo(int whichFloor, int whichCondo) {
 		}
 	}
 
-	kittenCount = 0;		//Reset rescue
-	kittenTotal = 0;		//Reset total found
+	propDamage = 0;		//Reset per condo stats
+	robotKill = 0;
+	kittenCount = 0;		//Reset rescue per condo
+	kittenToRescue = 0;		//Reset total found
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == true && object[x].category == 0 && object[x].type == 4) {		//Count kittens
-			kittenTotal++;
+			kittenToRescue++;
 		}
 	}
 
@@ -1498,7 +1593,9 @@ void exitCondo() {
 	
 	kittenMessageTimer = 0;				//Clear timer in case a message was on when Bud left
 	
-	kittenCountLevel += kittenCount;	//Condo cleared? Add how many kittens we recused to floor total
+	kittenFloor += kittenCount;			//Condo cleared? Add how many kittens we recused to floor total
+	robotKillFloor += robotKill;		//along with robots and property damage
+	propDamageFloor += propDamage;
 	
 	int count = 0;
 	
@@ -1522,6 +1619,16 @@ void exitCondo() {
 
 void condoLogic() {
 
+	drawSpriteDecimal(score, 80, 0, 0);
+	drawSpriteDecimal(kittenTotal, 80, 8, 0);
+	drawSpriteDecimal(robotKillTotal, 80, 16, 0);
+	drawSpriteDecimal(propDamageTotal, 80, 24, 0);
+
+	drawSpriteDecimal(kittenFloor, 40, 8, 0);
+	drawSpriteDecimal(robotKillFloor, 40, 16, 0);
+	drawSpriteDecimal(propDamageFloor, 40, 24, 0);
+
+
 	stopWatchTick();
 
 	drawSpriteDecimal(score, 80, 0, 0);
@@ -1537,18 +1644,18 @@ void condoLogic() {
 			if (kittenMessageTimer & 0x04) {
 				int offset = 4;
 				
-				if ((kittenTotal - kittenCount) > 9) {
+				if ((kittenToRescue - kittenCount) > 9) {
 					offset = 0;
 				}
 		
-				if (kittenCount == kittenTotal) {
+				if (kittenCount == kittenToRescue) {
 					drawSpriteText("GOTO THE EXIT", 8, 56, 3);
 				}
 				else {
 					drawSpriteText("RESCUE", 28 + offset, 52, 3);
-					drawSpriteDecimal(kittenTotal - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
+					drawSpriteDecimal(kittenToRescue - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
 					
-					if (kittenCount == (kittenTotal - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
+					if (kittenCount == (kittenToRescue - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
 						drawSpriteText("      /", 36, 60, 3);	
 					}				
 					drawSpriteText("KITTENS", 36, 60, 3);								
@@ -1557,7 +1664,7 @@ void condoLogic() {
 			kittenMessageTimer--;
 		}
 
-		if (kittenCount == kittenTotal) {
+		if (kittenCount == kittenToRescue) {
 			
 			drawSprite(7 - inArrowFrame, 88, 6, 16 + 12, 1, 2, 4, false, false);		//out arrow sprite <		
 			drawSprite(16, 84, 7, 16 + 11, 1, 3, 4, false, false);		//OUT text
@@ -1753,6 +1860,14 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 	stopWatchTick();
 
 	drawSpriteDecimal(score, 80, 0, 0);
+	drawSpriteDecimal(kittenTotal, 80, 8, 0);
+	drawSpriteDecimal(robotKillTotal, 80, 16, 0);
+	drawSpriteDecimal(propDamageTotal, 80, 24, 0);
+
+	drawSpriteDecimal(kittenFloor, 40, 8, 0);
+	drawSpriteDecimal(robotKillFloor, 40, 16, 0);
+	drawSpriteDecimal(propDamageFloor, 40, 24, 0);
+
 
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
 		if (kittenMessageTimer > 0) {
@@ -1954,9 +2069,14 @@ void objectLogic() {
 					if (object[g].category > 0 && object[g].state == 0) {	//Bud swipes inert objects
 						
 						if (object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
-							
-							propDamage++;							
-							
+	
+							if (currentMap == hallway) {
+								propDamageFloor++;
+							}
+							else {
+								propDamage++;
+							}
+	
 							fallListAdd(g);							//Add this item to the fall list
 							
 							playAudio("audio/slap.wav", 40);	
@@ -2007,7 +2127,13 @@ void objectLogic() {
 								
 								object[g].state = 201;			//State 100 = Stunned
 								object[g].animate = 0;
-
+								if (currentMap == hallway) {
+									robotKillFloor++;
+								}
+								else {
+									robotKill++;
+								}
+									
 							}								
 
 						}						
@@ -2018,8 +2144,15 @@ void objectLogic() {
 				
 				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art by jumping through it
 					
-					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {		
-						propDamage++;
+					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {	
+					
+						if (currentMap == hallway) {
+							propDamageFloor++;
+						}
+						else {
+							propDamage++;
+						}
+							
 						fallListAdd(g);							//Add this item to the fall list						
 						playAudio("audio/slap.wav", 30);	
 						object[g].state = 99;					//Falling
@@ -2064,12 +2197,13 @@ void setupElevator() {
 
 	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
 
-	kittenCountLevel = 30;
-	
-	robotKill = 20;
-	
-	propDamage = 10;
+	kittenFloor = 30;							//Testing
+	robotKillFloor = 20;
+	propDamageFloor = 10;
 
+	kittenTotal += kittenFloor;					//Inc globals
+	robotKillTotal += robotKillFloor;
+	propDamageTotal += propDamageFloor;
 
 	bonusPhase = 1;
 	bonusTimer = 0;
@@ -2097,98 +2231,82 @@ void elevatorLogic() {
 	switch(bonusPhase) {
 	
 		case 1:
-			drawText(" KITTENS SAVED", 0, 2, false);
-			drawDecimal(kittenCountLevel, 6, 3);
+			drawText(" KITTENS SAVED", 0, 3, false);
+			drawDecimal(kittenFloor, 7, 4);
 
 			if (++bonusTimer > 1) {
-				pwm_set_freq_duty(6, 520, 25);
+				music.PlayTrack(15);
 				bonusTimer = 0;
-				if (kittenCountLevel < 1) {
+				if (kittenFloor < 1) {
 					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 2;
 				}
 				else {
-					kittenCountLevel--;
+					kittenFloor--;
 					levelBonus += 2000;				
 				}
-			}
-			else {
-				pwm_set_freq_duty(6, 0, 0);	
 			}
 		break;	
 	
 	
 		case 2:
-			drawText("ROBOTS  SMASHED", 0, 2, false);
-			drawDecimal(robotKill, 6, 3);
+			drawText("ROBOTS  SMASHED", 0, 3, false);
+			drawDecimal(robotKillFloor, 7, 4);
 
 			if (++bonusTimer > 1) {
-				pwm_set_freq_duty(6, 520, 25);
+				music.PlayTrack(15);
 				bonusTimer = 0;
-				if (robotKill < 1) {
+				if (robotKillFloor < 1) {
 					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 3;
 				}
 				else {
-					robotKill--;
+					robotKillFloor--;
 					levelBonus += 500;					
 				}
-			}
-			else {
-				pwm_set_freq_duty(6, 0, 0);	
 			}
 		break;
 
 		case 3:
-			drawText("PROPERTY DAMAGE", 0, 2, false);
-			drawDecimal(propDamage, 6, 3);
+			drawText("PROPERTY DAMAGE", 0, 3, false);
+			drawDecimal(propDamageFloor, 7, 4);
 			
 			if (++bonusTimer > 1) {
-				pwm_set_freq_duty(6, 520, 25);
+				music.PlayTrack(15);
 				bonusTimer = 0;
-				if (propDamage < 1) {
+				if (propDamageFloor < 1) {
 					playAudio("audio/cash.wav", 100);
 					menuTimer = 40;
 					bonusPhase = 4;
 				}	
 				else {
-					propDamage--;			
+					propDamageFloor--;			
 					levelBonus += 100;					
 				}
-			}
-			else {
-				pwm_set_freq_duty(6, 0, 0);	
-			}			
+			}		
 		break;
 		
 		case 4:
-			drawText("  TIME BONUS   ", 0, 2, false);
-			drawText("00", 5, 3, false);
+			drawText("  TIME BONUS   ", 0, 3, false);
+			drawText("00:00 ", 5, 4, false);
 			
 			if (minutes > 9) {
-				drawDecimal(minutes, 5, 3);
+				drawDecimal(minutes, 5, 4);
 			}
 			else {
-				drawDecimal(minutes, 6, 3);
+				drawDecimal(minutes, 6, 4);
 			}
-			
-			drawText(":0", 6, 3, false);
-			
+
 			if (seconds > 9) {
-				drawDecimal(seconds, 8, 3);
+				drawDecimal(seconds, 8, 4);
 			}
 			else {
-				drawDecimal(seconds, 9, 3);
+				drawDecimal(seconds, 9, 4);
 			}
 			
-			if (seconds & 1) {
-				pwm_set_freq_duty(6, 520, 25);
-			}
-			else {
-				pwm_set_freq_duty(6, 0, 0);
-			}
+			music.PlayTrack(15);
 
 			seconds--;
 			levelBonus += 5;
@@ -2198,14 +2316,15 @@ void elevatorLogic() {
 					playAudio("audio/cash.wav", 100);
 					bonusPhase = 5;
 					score += levelBonus;
-					levelBonus = 0;
 					menuTimer = 50;
 				}
 			}
 		break;
 		
 		case 5:
-			pwm_set_freq_duty(6, 0, 0);
+			music.StopTrack(15);
+			drawText("  TOTAL SCORE", 0, 10, false);
+			drawDecimal(score, 5, 11);				
 			if (--menuTimer < 1) {
 				nextFloor();
 			}		
@@ -2218,8 +2337,7 @@ void elevatorLogic() {
 	drawText("  LEVEL BONUS", 0, 6, false);
 	drawDecimal(levelBonus, 5, 7);	
 	
-	drawText("     SCORE", 0, 9, false);
-	drawDecimal(score, 5, 10);	
+
 	
 	
 }
@@ -2525,6 +2643,7 @@ void storyLogic() {
 	}
 
 	if (button(A_but)) {
+		music.StopTrack(0);		//Kill intro track
 		switchGameTo(game);
 	}
 	
@@ -2556,6 +2675,14 @@ void nextFloor() {
 	currentCondo = 0;			//Bud hasn't entered a condo
 
 	hallwayBudSpawn = 10;		//Bud from elevator
+
+	levelBonus = 0;
+	
+	kittenFloor = 0;				//Total per floor (added to on condo clear)			
+	propDamage = 0;					//Per condo
+	propDamageFloor = 0;			//Total per floor (added to on condo clear)
+	robotKill = 0;					//Per condo
+	robotKillFloor = 0;				//Total per floor (added to on condo clear)	
 
 	stopWatchClear();
 	switchGameTo(goHallway);
@@ -3158,13 +3285,13 @@ void budLogic2() {
 		if (button(A_but)) {
 			//playAudio("audio/hitModem.wav", 90);
 			
-			// levelComplete = true;
-			// elevatorOpen = true;
-			// drawHallwayElevator(64);
-			// redrawMapTiles();
-			// kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
+			levelComplete = true;
+			elevatorOpen = true;
+			drawHallwayElevator(64);
+			redrawMapTiles();
+			kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
 		
-			kittenCount = kittenTotal;
+			//kittenCount = kittenTotal;
 		}	
 			
 	}
@@ -3254,7 +3381,7 @@ bool budMoveLeftC(int speed) {
 		}	
 
 		if (budX < 8 && currentMap == condo) {
-			if (kittenCount == kittenTotal) {
+			if (kittenCount == kittenToRescue) {		//Rescued enough to exit condo
 				exitCondo();
 			}
 			else {
