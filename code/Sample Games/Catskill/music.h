@@ -19020,51 +19020,6 @@ const byte wiley[] PROGMEM = {
     68, 218, 122,
 };
 
-const byte ding[] PROGMEM = {
-    // Length and loop point offset
-    0, 66, 0, 64,
-    // Region flag: 0 = NTSC (default - change as required), 1 = PAL
-    0,
-    // DMC samples
-    0,
-    // APU frames
-    182, 180, 244, 218, 122, 0, 0, 0,
-    18, 11, 127, 47,
-    2, 11, 52,
-    2, 10, 236,
-    0,
-    2, 15, 17,
-    16, 46,
-    0,
-    16, 45,
-    0,
-    16, 44,
-    0,
-    16, 43,
-    0,
-    16, 42,
-    0,
-    16, 41,
-    0,
-    16, 40,
-    0,
-    16, 39,
-    0,
-    16, 38,
-    0,
-    16, 37,
-    0,
-    16, 36,
-    0,
-    16, 35,
-    0,
-    16, 34,
-    0,
-    16, 33,
-    0,
-    16, 0,
-};
-
 const byte titleMusic[] PROGMEM = {
     // Length and loop point offset
     3, 25, 3, 22,
@@ -19874,7 +19829,6 @@ const byte game_over[] PROGMEM = {
     2, 3, 19,
     16, 0,
 };
-
 
 const byte saveLoad[] PROGMEM = {
     // Length and loop point offset

@@ -336,7 +336,6 @@ void setup() { //------------------------Core0 handles the file system and game 
 	music.AddTrack(titleMusic, 9);
 	music.AddTrack(saveLoad, 10);
 	music.AddTrack(game_over, 11);
-	music.AddTrack(ding, 15);
 	
 	
 }
@@ -350,7 +349,7 @@ void setup1() { //-----------------------Core 1 builds the tile display and send
 
 void loop() {	//-----------------------Core 0 handles the main logic loop
 	
-	if (nextFrameFlag == 2) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
+	if (nextFrameFlag > 1) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
 	
 		nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)
 		LCDsetDrawFlag();				//Tell core1 to start drawing a frame
@@ -363,9 +362,16 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 	}
 
 	if (displayPauseState == true) {  		//If paused for USB xfer, push START to unpause 
+	
 		if (button(start_but)) {        //Button pressed?
-		  displayPause(false);
-		  switchGameTo(titleScreen);
+			displayPause(false);
+
+			if (gameState == pauseMode) {			//USB menu pause? Go back to main menu (else game will resume I think?)		  
+				switchGameTo(titleScreen);
+			}
+			else {
+				music.PauseTrack(currentFloor);		//Probably needs to be current MUSIC?
+			}
 		}    
 	}
 
@@ -404,45 +410,6 @@ void loop1() { //------------------------Core 1 handles the graphics blitter. Co
 
 }
 
-void displayPause(bool state) {
-
-	displayPauseState = state;	
-	pauseLCD(state);
-
-}
-
-void drawSplashScreen() {
-
-	fillTiles(0, 0, 14, 14, 0, 3);
-	
-	for (int y = 0 ; y < 7 ; y++) {		
-		for (int x = 0 ; x < 15 ; x++) {		
-			drawTile(x, y, x, y, 0, 0);
-		}		
-	}
-	
-	for (int y = 0 ; y < 3 ; y++) {		
-		for (int x = 0 ; x < 15 ; x++) {		
-			drawTile(x, y + 8, x, y + 8, 1, 0);
-		}		
-	}	
-	
-	for (int y = 0 ; y < 2 ; y++) {		
-		for (int x = 0 ; x < 15 ; x++) {		
-			drawTile(x, y + 12, x, y + 11, 3, 0);
-		}		
-	}		
-
-	setWindow(0, 0);
-	menuTimer = 60;					//Splash Screen for 2 second
-	//displayPause = false;   		//Allow core 2 to draw
-	displayPause(false);
-	isDrawn = true;
-	
-	playAudio("audio/gameBadge.wav", 100);		//Splash audio
-	
-}
-
 void gameLoopLogic() {
 
 	switch(gameLoopState) {
@@ -458,7 +425,7 @@ void gameLoopLogic() {
 			gpio_put(15, 0);
 		break;		
 		
-		case 2:									//Done with our audio, now waiting for frame to finish rendering (we can start our logic during the final DMA)
+		case 2:									//Done with our audio, now waiting for frame to finish rendering (we can start our vid mem logic during the final DMA)
 			if (getRenderStatus() == false) {	//Wait for core 1 to finish drawing frame
 				gameLoopState = 3;				//Jump to next check
 			}
@@ -470,19 +437,20 @@ void gameLoopLogic() {
 			gameLoopState = 0;					//Done, wait for next frame flag
 			gpio_put(15, 0);
 		break;		
-		
-		
+			
 	}
-	
-	
-}
 
+}
 
 void gameFrame() {
 	
+	// if (displayPauseState == true) {			//Pause? Do no logic
+		// return;
+	// }
+	
 	// if (displayPauseState == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
 		
-		// // while(frameDrawing == false) {			//Wait for Core1 to begin rendering the frame
+		// // while(frameDrawing == false) {			//Wait for Core 1 to begin rendering the frame
 			// // delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
 		// // }
 		// //OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
@@ -592,7 +560,7 @@ void gameFrame() {
 			if (button(up_but)) {
 				if (cursorY > 9) {
 					cursorY--;
-					music.PlayTrack(15);
+					//music.PlayTrack(15);
 					//pwm_set_freq_duty(6, 493, 25);
 					soundTimer = 10;
 				}				
@@ -600,7 +568,7 @@ void gameFrame() {
 			if (button(down_but)) {
 				if (cursorY < 12) {
 					cursorY++;
-					music.PlayTrack(15);
+					//music.PlayTrack(15);
 					//pwm_set_freq_duty(6, 520, 25);
 					soundTimer = 10;
 				}				
@@ -742,6 +710,18 @@ void gameFrame() {
 		
 		
 	}
+
+	if (displayPauseState == false) {  		//Screen NOT paused?
+		if (button(start_but)) {        	//Button pressed?		
+			if (gameState == goCondo || gameState == goHallway) {		//Only times you can PAWS get it?
+				displayPause(true);
+				playAudio("audio/pause_K.wav", 100);
+				music.PauseTrack(currentFloor);		//Probably needs to be current MUSIC?								
+			}
+		}    
+	}
+
+
 	
 	if (soundTimer > 0) {
 		if (--soundTimer == 0) {
@@ -757,6 +737,45 @@ void switchGameTo(stateMachineGame x) {		//Switches state of game
 	displayPause(true);
 	gameState = x;		
 	isDrawn = false;
+	
+}
+
+void displayPause(bool state) {
+
+	displayPauseState = state;	
+	pauseLCD(state);
+
+}
+
+void drawSplashScreen() {
+
+	fillTiles(0, 0, 14, 14, 0, 3);
+	
+	for (int y = 0 ; y < 7 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y, x, y, 0, 0);
+		}		
+	}
+	
+	for (int y = 0 ; y < 3 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y + 8, x, y + 8, 1, 0);
+		}		
+	}	
+	
+	for (int y = 0 ; y < 2 ; y++) {		
+		for (int x = 0 ; x < 15 ; x++) {		
+			drawTile(x, y + 12, x, y + 11, 3, 0);
+		}		
+	}		
+
+	setWindow(0, 0);
+	menuTimer = 60;					//Splash Screen for 2 second
+	//displayPause = false;   		//Allow core 2 to draw
+	displayPause(false);
+	isDrawn = true;
+	
+	playAudio("audio/gameBadge.wav", 100);		//Splash audio
 	
 }
 
@@ -896,7 +915,7 @@ void loadLogic() {
 	if (button(up_but)) {
 		if (cursorY > 7) {
 			cursorY--;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
@@ -904,7 +923,7 @@ void loadLogic() {
 	if (button(down_but)) {
 		if (cursorY < 9) {
 			cursorY++;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
@@ -1000,7 +1019,7 @@ void saveLogic() {
 	if (button(up_but)) {
 		if (cursorY > 7) {
 			cursorY--;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
@@ -1008,7 +1027,7 @@ void saveLogic() {
 	if (button(down_but)) {
 		if (cursorY < 9) {
 			cursorY++;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
@@ -1195,7 +1214,7 @@ void gameOverLogic() {
 	if (button(up_but)) {
 		if (cursorY > 4) {
 			cursorY--;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 493, 25);
 			soundTimer = 10;
 		}				
@@ -1203,7 +1222,7 @@ void gameOverLogic() {
 	if (button(down_but)) {
 		if (cursorY < 6) {
 			cursorY++;
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 520, 25);
 			soundTimer = 10;
 		}				
@@ -1590,14 +1609,18 @@ void exitCondo() {
 
 void condoLogic() {
 
-	drawSpriteDecimal(score, 80, 0, 0);
-	drawSpriteDecimal(kittenTotal, 80, 8, 0);
-	drawSpriteDecimal(robotKillTotal, 80, 16, 0);
-	drawSpriteDecimal(propDamageTotal, 80, 24, 0);
+	if (displayPauseState == true) {			//Pause? Do no logic
+		return;
+	}
 
-	drawSpriteDecimal(kittenFloor, 40, 8, 0);
-	drawSpriteDecimal(robotKillFloor, 40, 16, 0);
-	drawSpriteDecimal(propDamageFloor, 40, 24, 0);
+	// drawSpriteDecimal(score, 80, 0, 0);
+	// drawSpriteDecimal(kittenTotal, 80, 8, 0);
+	// drawSpriteDecimal(robotKillTotal, 80, 16, 0);
+	// drawSpriteDecimal(propDamageTotal, 80, 24, 0);
+
+	// drawSpriteDecimal(kittenFloor, 40, 8, 0);
+	// drawSpriteDecimal(robotKillFloor, 40, 16, 0);
+	// drawSpriteDecimal(propDamageFloor, 40, 24, 0);
 
 
 	stopWatchTick();
@@ -1828,16 +1851,20 @@ void spawnIntoHallway(int windowStartCoarseX, int budStartCoarseX, int budStartF
 
 void hallwayLogic() { //--------------------This is called at 30Hz. Your main game state machine should reside here
 
+	if (displayPauseState == true) {			//Pause? Do no logic
+		return;
+	}
+
 	stopWatchTick();
 
-	drawSpriteDecimal(score, 80, 0, 0);
-	drawSpriteDecimal(kittenTotal, 80, 8, 0);
-	drawSpriteDecimal(robotKillTotal, 80, 16, 0);
-	drawSpriteDecimal(propDamageTotal, 80, 24, 0);
+	// drawSpriteDecimal(score, 80, 0, 0);
+	// drawSpriteDecimal(kittenTotal, 80, 8, 0);
+	// drawSpriteDecimal(robotKillTotal, 80, 16, 0);
+	// drawSpriteDecimal(propDamageTotal, 80, 24, 0);
 
-	drawSpriteDecimal(kittenFloor, 40, 8, 0);
-	drawSpriteDecimal(robotKillFloor, 40, 16, 0);
-	drawSpriteDecimal(propDamageFloor, 40, 24, 0);
+	// drawSpriteDecimal(kittenFloor, 40, 8, 0);
+	// drawSpriteDecimal(robotKillFloor, 40, 16, 0);
+	// drawSpriteDecimal(propDamageFloor, 40, 24, 0);
 
 
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
@@ -2206,7 +2233,7 @@ void elevatorLogic() {
 			drawDecimal(kittenFloor, 7, 4);
 
 			if (++bonusTimer > 1) {
-				music.PlayTrack(15);
+				//music.PlayTrack(15);
 				bonusTimer = 0;
 				if (kittenFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2226,7 +2253,7 @@ void elevatorLogic() {
 			drawDecimal(robotKillFloor, 7, 4);
 
 			if (++bonusTimer > 1) {
-				music.PlayTrack(15);
+				//music.PlayTrack(15);
 				bonusTimer = 0;
 				if (robotKillFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2245,7 +2272,7 @@ void elevatorLogic() {
 			drawDecimal(propDamageFloor, 7, 4);
 			
 			if (++bonusTimer > 1) {
-				music.PlayTrack(15);
+				//music.PlayTrack(15);
 				bonusTimer = 0;
 				if (propDamageFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2277,7 +2304,7 @@ void elevatorLogic() {
 				drawDecimal(seconds, 9, 4);
 			}
 			
-			music.PlayTrack(15);
+			//music.PlayTrack(15);
 
 			seconds--;
 			levelBonus += 5;
@@ -2293,7 +2320,7 @@ void elevatorLogic() {
 		break;
 		
 		case 5:
-			music.StopTrack(15);
+			//music.StopTrack(15);
 			drawText("  TOTAL SCORE", 0, 10, false);
 			drawDecimal(score, 5, 11);				
 			if (--menuTimer < 1) {
