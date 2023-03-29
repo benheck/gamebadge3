@@ -60,7 +60,9 @@
 	void drawText(const char *text, uint8_t x, uint8_t y, bool doWrap = false);
 	void drawSpriteText(const char *text, uint8_t x, uint8_t y, int whatPalette);
 	void drawDecimal(int32_t theValue, uint8_t x, uint8_t y);
+	void drawDecimal(int32_t theValue, uint8_t y) ;
 	void drawSpriteDecimal(int32_t theValue, uint8_t x, uint8_t y, int whatPalette);
+	void drawSpriteDecimalRight(int32_t theValue, uint8_t xRight, uint8_t y, int whatPalette);
 	
 	
 	void drawSprite(int xPos, int yPos, uint16_t whichTile, uint8_t whichPalette, bool hFlip = false, bool vFlip = false);

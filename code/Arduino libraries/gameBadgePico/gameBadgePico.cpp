@@ -639,6 +639,39 @@ void drawDecimal(int32_t theValue, uint8_t x, uint8_t y) {			//Send up to a 9 di
 	}
 }
 
+void drawDecimal(int32_t theValue, uint8_t y) {			//Same as above but centers the number on screen. Good for end of level scores
+
+	int zPad = 0;							//Flag for zero padding
+	uint32_t divider = 100000000;			//Divider starts at 900 million = max decimal printable is 999,999,999
+
+	char theText[10];
+	theText[0] = '0';						//Hopefully you don't suck this bad, but if you do...
+	for (int g = 1 ; g < 10 ; g++) {		//Ensure zero termination
+		theText[g] = 0;
+	}
+	
+	int x = 0;
+
+	for (int xx = 0 ; xx < 9 ; xx++) {		//9 digit number
+		if (theValue >= divider) {
+			theText[x++] = '0' + (theValue / divider);
+			theValue %= divider;
+			zPad = 1;
+		}
+		else if (zPad || divider == 1) {			
+			theText[x++] = '0';
+		}
+		divider /= 10;
+	}
+	
+	x--;			//Get rid of last inc
+	
+	int xPos = (15 - x) / 2;		//Center text
+	drawText(theText, xPos, y, false);
+	
+}
+
+
 void drawSpriteDecimal(int32_t theValue, uint8_t x, uint8_t y, int whatPalette) {			//Send up to a 9 digit decimal value to memory
 
 	int zPad = 0;							//Flag for zero padding
@@ -658,6 +691,41 @@ void drawSpriteDecimal(int32_t theValue, uint8_t x, uint8_t y, int whatPalette) 
 		divider /= 10;		
 	}
 }
+
+void drawSpriteDecimalRight(int32_t theValue, uint8_t xRight, uint8_t y, int whatPalette) {			//Send up to a 9 digit decimal value to memory
+
+	int zPad = 0;							//Flag for zero padding
+	uint32_t divider = 100000000;			//Divider starts at 900 million = max decimal printable is 999,999,999
+
+	char theText[10];
+	theText[0] = '0';						//Hopefully you don't suck this bad, but if you do...
+	for (int g = 1 ; g < 10 ; g++) {		//Ensure zero termination
+		theText[g] = 0;
+	}
+	
+	int x = 0;
+
+	for (int xx = 0 ; xx < 9 ; xx++) {		//9 digit number
+		if (theValue >= divider) {
+			theText[x++] = '0' + (theValue / divider);
+			theValue %= divider;
+			zPad = 1;
+		}
+		else if (zPad || divider == 1) {			
+			theText[x++] = '0';
+		}
+		divider /= 10;
+	}
+	
+	x--;						//Get rid of last inc
+
+	do {
+		drawSprite(xRight, y, theText[x--], whatPalette);
+		xRight -= 8;	
+	} while (x > -1);
+
+}
+
 
 
 //Draws a sprite at xPos/yPos using a range of tiles from the pattern table, starting at tileX/Y, ending at xWide/yHigh, using whichpalette and flipped V/H if true 

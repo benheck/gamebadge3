@@ -6,8 +6,6 @@
 
 GBAudio music;
 
-//struct repeating_timer timer30Hz;			//This runs the game clock at 30Hz
-
 char testX = 0;
 
 bool firstFrame = false;
@@ -128,7 +126,7 @@ int lastAdded = 0xFF;
 bool gameActive = false;
 bool isDrawn = false;													//Flag that tells new state it needs to draw itself before running logic
 
-enum stateMachineGame { bootingMenu, splashScreen, titleScreen, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { bootingMenu, splashScreen, titleScreen, diffSelect, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = bootingMenu;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -238,8 +236,9 @@ int budDeath = 0;						//If set, move Bud to center of screen then switch to KIT
 int jailYpos;
 int budLives;
 int budPower;
+int powerMax = 3;
 int budBlink;
-int budPalette;				//Uber hack to make Bud blink when invincible, if blink & 1 budPalette = 8 which is blank palette RAM
+int budPalette;							//Uber hack to make Bud blink when invincible, if blink & 1 budPalette = 8 which is blank palette RAM
 int budStunned;
 bool budStunnedDir;
 
@@ -311,6 +310,10 @@ struct repeating_timer timerWFGenerator;    // Timer for the waveform generator
 
 int gameLoopState = 0;
 
+int mewTimer = 0;						//Bud mewing for no reason. Just like real life!
+
+int difficulty = 2;						//1= Kitten 2 = Cat 3 = Dark Souls of Pumas
+
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -332,10 +335,13 @@ void setup() { //------------------------Core0 handles the file system and game 
 	music.AddTrack(stage_5, 5);		//
 	
 	music.AddTrack(wiley, 6);
-	
+
 	music.AddTrack(titleMusic, 9);
 	music.AddTrack(saveLoad, 10);
 	music.AddTrack(game_over, 11);
+	music.AddTrack(selection, 12);
+	
+	music.AddTrack(ping, 15);
 	
 	
 }
@@ -354,9 +360,7 @@ void loop() {	//-----------------------Core 0 handles the main logic loop
 		nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)
 		LCDsetDrawFlag();				//Tell core1 to start drawing a frame
 
-		if (gameLoopState == 0) {		//If the last game logic loop has finished, start the next
-			gameLoopState = 1;			
-		}
+		gameLoopState = 1;			
 
 		serviceDebounce();				//Debounce buttons
 	}
@@ -578,13 +582,8 @@ void gameFrame() {
 				menuTimer = 0;
 				music.StopTrack(9);				//In case title music is playing
 				switch(cursorY) {					
-					case 9:					
-						loadFlag = false;				//NEW GAME				
-						//switchGameTo(game);
-						//GO CUTSCENE
-						whichScene = 0;
-						music.PlayTrack(0, false);
-						switchGameTo(story);						
+					case 9:		
+						switchGameTo(diffSelect);		//New game, start by selecting difficulty					
 					break;
 					
 					case 10:
@@ -610,6 +609,15 @@ void gameFrame() {
 			//TIMER TO ATTRACT
 			//SELECT START
 		break;
+		
+		case diffSelect:
+			if (isDrawn == false) {
+				setupDiffSelect();
+			}
+			else {
+				diffSelectLogic();
+			}			
+			break;
 
 		case levelEdit:
 			if (isDrawn == false) {
@@ -978,6 +986,9 @@ void setupSave() {
 	drawText("SLOT 2", 6, 8, false);
 	drawText("SLOT 3", 6, 9, false);
 
+	drawText("  LEVEL SCORE", 0, 13, false);
+	drawDecimal(levelScore, 14);		//Draw score + bonus but don't actually add it til the end
+
 	checkSaveSlots();
 
 	for (int x = 0 ; x < 3 ; x++) {
@@ -1110,12 +1121,13 @@ void saveGameFile(int slot) {
 	}
 
 	writeByte(currentFloor);
-	writeByte(score >> 24);
-	writeByte((score >> 16) & 0xFF);
-	writeByte((score >> 8) & 0xFF);
-	writeByte(score & 0xFF);
+	writeByte(difficulty);
+	writeByte(levelScore >> 24);			//Save the last level score (what your score was when level started)
+	writeByte((levelScore >> 16) & 0xFF);
+	writeByte((levelScore >> 8) & 0xFF);
+	writeByte(levelScore & 0xFF);
 
-	writeByte((kittenTotal >> 8) & 0xFF);
+	writeByte((kittenTotal >> 8) & 0xFF);	//Same, save your last progress. There's no point in saving on level 1
 	writeByte(kittenTotal & 0xFF);
 	writeByte((robotKillTotal >> 8) & 0xFF);
 	writeByte(robotKillTotal & 0xFF);
@@ -1145,9 +1157,15 @@ void loadGameFile(int slot) {
 	}
 	
 	currentFloor = readByte();
+	difficulty = readByte();
+	
+	powerMax = 5 - difficulty;
+	//Load the last level score
 	
 	levelScore = 0;	
 	levelScore = (readByte() << 24) | (readByte() << 16) | (readByte() << 8) | readByte();
+
+	score = levelScore;		//Score = level score
 
 	kittenTotal = 0;
 	kittenTotal = (readByte() << 8) | readByte();
@@ -1168,6 +1186,118 @@ void loadGameFile(int slot) {
 }
 
 
+void setupDiffSelect() {
+
+	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles
+	loadPattern("title/bud_face.nes", 256, 256);	//Table 1 = Bud Face sprites
+
+	fillTiles(0, 0, 14, 14, ' ', 0);			//Black BG
+			
+	setWindow(0, 0);
+	
+			//0123456789ABCDE				//Draw score centered
+	drawText("    SELECT", 0, 0, false);		
+	drawText("  DIFFICULTY", 0, 1, false);
+
+	cursorTimer = 0;
+	cursorAnimate = 0x0C;
+
+	setButtonDebounce(left_but, true, 1);
+	setButtonDebounce(right_but, true, 1);
+
+	displayPause(false);   		//Allow core 2 to draw
+	isDrawn = true;	
+	
+	music.PlayTrack(12, false);
+	
+}
+
+void diffSelectLogic() {
+
+	fillTiles(0, 13, 14, 14, ' ', 0);					//Erase text
+
+	if (++cursorTimer > 3) {
+		cursorTimer = 0;
+		cursorAnimate += 0x10;
+		if (cursorAnimate > 0x1C) {
+			cursorAnimate = 0x0C;
+		}
+	}
+
+	drawTile(14, 1, cursorAnimate, 0, 0);			//Animated arrow right
+	drawTile(0, 1, cursorAnimate + 1, 0, 0);			//Animated arrow left
+
+	switch(difficulty) {
+		
+		case 1:
+			drawSprite(28, 28, 0, 16, 8, 8, 4, false, false);
+			drawText("     KITTEN", 0, 13, false);
+		break;
+		
+		case 2:
+			drawSprite(28, 28, 8, 16, 8, 8, 4, false, false);
+			drawText("      CAT", 0, 13, false);
+		break;
+			        //0123456789ABCDE				//Draw score centered			
+		case 3:
+			drawSprite(28, 28, 0, 16 + 8, 8, 8, 4, false, false);
+			drawText("THE DARK SOULS", 0, 13, false);
+			drawText("   OF PUMAS", 0, 14, false);
+		break;
+		
+	}
+
+	bool changed = false;
+
+	if (button(left_but)) {
+		if (--difficulty < 1) {
+			difficulty = 3;
+		}
+		changed = true;		
+	}
+	if (button(right_but)) {
+		if (++difficulty > 3) {
+			difficulty = 1;
+		}	
+		changed = true;		
+	}
+	
+	if (changed) {
+	
+		switch(difficulty) {
+			case 1:
+				playAudio("audio/kitmeow3.wav", 90);
+			break;
+			
+			case 2:
+				playAudio("audio/bud_mew.wav", 90);
+			break;
+	
+			case 3:
+				playAudio("audio/lion.wav", 90);
+			break;
+		}
+	}
+		
+	if (button(A_but)) {
+		music.StopTrack(12);		
+		startNewGame();				
+	}
+
+}
+
+void startNewGame() {
+	
+	powerMax = 5 - difficulty;
+	
+	loadFlag = false;				//NEW GAME				
+	whichScene = 0;
+	music.PlayTrack(0, false);
+	switchGameTo(story);		
+	
+}
+
 void setupGameOver() {
 
 	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
@@ -1176,7 +1306,11 @@ void setupGameOver() {
 	fillTiles(0, 0, 31, 15, ' ', 0);			//Black BG
 			
 	setWindow(0, 0);
+	
 			//0123456789ABCDE
+	drawText("  TOTAL SCORE", 0, 13, false);
+	drawDecimal(score, 14);		
+	
 	drawText("   GAME OVER", 0, 2, false);
 
 	drawText("  CONTINUE", 0, 4, false);
@@ -1235,11 +1369,7 @@ void gameOverLogic() {
 		menuTimer = 0;
 		switch(cursorY) {					
 			case 4:		
-				budLives = 3;
-				budPower = 3;
-				budStunned = 0;
-				hallwayBudSpawn = 11;		//If die in hallway, spawns in front of closed elevator
-				switchGameTo(goHallway);				
+				continueLevel();				
 			break;
 			
 			case 5:
@@ -1256,6 +1386,28 @@ void gameOverLogic() {
 	
 }
 
+void continueLevel() {
+	
+	powerMax = 5 - difficulty;
+	
+	score = levelScore;		//Reset score to whatever it was when we entered level
+	
+	propDamage = 0;			//Reset counts (but not totals)
+	propDamageFloor = 0;
+	
+	robotKill = 0;
+	robotKillFloor = 0;
+	
+	kittenCount = 0;
+	kittenFloor = 0;
+
+	budLives = 3;
+	budPower = powerMax;
+	budStunned = 0;
+	hallwayBudSpawn = 11;		//Continue spawns in front of closed elevator
+	switchGameTo(goHallway);	//Spawn
+	
+}
 
 void startGame() {
 
@@ -1274,11 +1426,10 @@ void startGame() {
 
 	//currentFloor = 1;			//Setup game here
 	currentCondo = 0;			//Bud hasn't entered a condo
-	budLives = 2;
-	budPower = 3;
+	budLives = 1;
+	budPower = powerMax;
 	hallwayBudSpawn = 0;		//Bud jumps through glass
 
-	budPower = 3;
 	jump = 0;
 	velocikitten = 0;
 
@@ -1307,14 +1458,13 @@ void resumeGame() {
 	kittenCount = 0;
 	kittenFloor = 0;
 	
-	score = levelScore;
+	score = levelScore;			//Your loaded score is whatever score you had upon entering the level where you died and saved
 
 	currentCondo = 0;			//Bud hasn't entered a condo
-	budLives = 2;
-	budPower = 3;
+	budLives = 3;
+	budPower = powerMax;
 	hallwayBudSpawn = 11;		//For a load, spawn in front of elevator (only crash window for new game start)
 
-	budPower = 3;
 	jump = 0;
 	velocikitten = 0;
 
@@ -1376,6 +1526,9 @@ void jailLogic() {
 	drawSprite(40, 80, 0x01F8, 0, false, false);
 	drawSprite(56, 80, 0x01F9, 0, false, false);
 	drawSpriteDecimal(budLives, 72, 80, 0);
+
+	drawText("  TOTAL SCORE", 0, 13, false);
+	drawDecimal(score + levelBonus, 14);		//Draw score + bonus but don't actually add it til the end
 	
 	if (menuTimer > 50) {
 		drawSprite(52, 47, 13, 16 + 13, 2, 3, 4, false, false);		//Sitting
@@ -1399,7 +1552,7 @@ void jailLogic() {
 				switchGameTo(gameOver);			
 			}
 			else {
-				budPower = 3;
+				budPower = powerMax;
 				jump = 0;
 				velocikitten = 0;
 				switch(lastMap) {
@@ -1409,7 +1562,7 @@ void jailLogic() {
 					break;
 					
 					case hallway:
-						budPower = 3;
+						budPower = powerMax;
 						budStunned = 0;
 						hallwayBudSpawn = 11;		//If die in hallway, spawns in front of closed elevator
 						switchGameTo(goHallway);						
@@ -1613,19 +1766,18 @@ void condoLogic() {
 		return;
 	}
 
-	// drawSpriteDecimal(score, 80, 0, 0);
+	stopWatchTick();	
+	
 	// drawSpriteDecimal(kittenTotal, 80, 8, 0);
 	// drawSpriteDecimal(robotKillTotal, 80, 16, 0);
 	// drawSpriteDecimal(propDamageTotal, 80, 24, 0);
 
-	// drawSpriteDecimal(kittenFloor, 40, 8, 0);
+	//drawSpriteDecimal(budX, 40, 8, 0);
 	// drawSpriteDecimal(robotKillFloor, 40, 16, 0);
 	// drawSpriteDecimal(propDamageFloor, 40, 24, 0);
 
 
-	stopWatchTick();
 
-	drawSpriteDecimal(score, 80, 0, 0);
 
 	if (budState != dead) {						//Messages top sprite pri, but don't draw if Bud dying
 		if (kittenMessageTimer > 0) {
@@ -1670,6 +1822,7 @@ void condoLogic() {
 		}
 	}
 
+	drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
 	drawBudStats();
 	budLogic2();
 
@@ -1876,6 +2029,7 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 		}
 	}
 
+	drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
 	drawBudStats();
 
 	if (budSpawned == true) {
@@ -1953,13 +2107,13 @@ void objectLogic() {
 		if (object[g].active) {
 			object[g].scan(worldX + xShake, 0 + yShake);					//Draw object if active, plus logic (in object) Robots move if off-camera
 
-			if (object[g].state == 99) { // && object[g].moving == true) {						//Object falling?
+			if (object[g].state == 99 && object[g].moving == true) {						//Object falling?
 				object[g].yPos += object[g].animate;
 				
 				if (object[g].animate < 8) {			//Object has to reach full fall speed in order to break or hit a robot
 					object[g].animate++;				//Keep approaching TERMINAL VELOCITY
 				}
-				//else {									//Object can now break
+
 				if (objectToTile(g) == true && object[g].animate > 4) {				//Scan base of object and see if it hit something solid (as wide as itself)
 				//if (object[g].yPos > (119 - (object[g].height << 3))) {		//Object hit the floor?
 					object[g].state = 100;					//Flag for main logic
@@ -1970,10 +2124,8 @@ void objectLogic() {
 					object[g].height = 1;						//Same width, height of 1 tile
 					object[g].category = 99;					//Set to null type
 				}
-				//}
-
+				
 			}
-
 
 			if (object[g].state == 100) {				//Object hit floor?
 				if (object[g].type == 50) {				//Chandelier? Big sound
@@ -2037,14 +2189,14 @@ void objectLogic() {
 						
 					}	
 					
-					if (object[g].type == 5 && budPower < 3) {						//Greenie? Only run logic if Bud needs power (no pickup on full power)
+					if (object[g].type == 5 && budPower < powerMax) {						//Greenie? Only run logic if Bud needs power (no pickup on full power)
 						
 						if (object[g].hitBoxSmall(budWx1, budWy1, budWx2, budWy2) == true) {	//EAT????
 							score += 100;
 							object[g].active = 0;
 							playAudio("audio/greenie.wav", 90);
-							if (++budPower > 3) {
-								budPower = 3;
+							if (++budPower > powerMax) {
+								budPower = powerMax;
 							}
 						}
 						
@@ -2074,7 +2226,8 @@ void objectLogic() {
 							else {
 								propDamage++;
 							}
-	
+							score += 2;
+
 							fallListAdd(g);							//Add this item to the fall list
 							
 							playAudio("audio/slap.wav", 40);	
@@ -2090,7 +2243,7 @@ void objectLogic() {
 							
 							if (object[g].xSentryLeft == 0 && object[g].hitBox(budAx1, budAy1, budAx2, budAy2) == true) {
 								
-								score += 10;						//Score hack!
+								score += 1;						//Score hack!
 								
 								object[g].xSentryLeft = 40;			//Cooldown for swat sounds
 								
@@ -2125,6 +2278,9 @@ void objectLogic() {
 								
 								object[g].state = 201;			//State 100 = Stunned
 								object[g].animate = 0;
+								
+								score += 125;
+								
 								if (currentMap == hallway) {
 									robotKillFloor++;
 								}
@@ -2140,7 +2296,7 @@ void objectLogic() {
 						
 				}	
 				
-				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art by jumping through it
+				if (object[g].category == 1 && jump > 0 && object[g].state == 0) {	//Bud can knock loose bad art and chandeliers by jumping through it
 					
 					if (object[g].hitBox(budWx1, budWy1, budWx2, budWy2) == true) {	
 					
@@ -2150,6 +2306,8 @@ void objectLogic() {
 						else {
 							propDamage++;
 						}
+							
+						score += 1;								//Very low effort!	
 							
 						fallListAdd(g);							//Add this item to the fall list						
 						playAudio("audio/slap.wav", 30);	
@@ -2218,22 +2376,16 @@ void setupElevator() {
 
 void elevatorLogic() {
 
-	// if (menuTimer > 0) {
-		// if (--menuTimer > 0) {
-			// return;
-		// }
-	// }
-
 	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
 
 	switch(bonusPhase) {
 	
 		case 1:
 			drawText(" KITTENS SAVED", 0, 3, false);
-			drawDecimal(kittenFloor, 7, 4);
+			drawDecimal(kittenFloor, 4);
 
 			if (++bonusTimer > 1) {
-				//music.PlayTrack(15);
+				music.PlayTrack(15);
 				bonusTimer = 0;
 				if (kittenFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2242,18 +2394,17 @@ void elevatorLogic() {
 				}
 				else {
 					kittenFloor--;
-					levelBonus += 2000;				
+					levelBonus += 100;				
 				}
 			}
 		break;	
 	
-	
 		case 2:
 			drawText("ROBOTS  SMASHED", 0, 3, false);
-			drawDecimal(robotKillFloor, 7, 4);
+			drawDecimal(robotKillFloor, 4);
 
 			if (++bonusTimer > 1) {
-				//music.PlayTrack(15);
+				music.PlayTrack(15);
 				bonusTimer = 0;
 				if (robotKillFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2262,17 +2413,17 @@ void elevatorLogic() {
 				}
 				else {
 					robotKillFloor--;
-					levelBonus += 500;					
+					levelBonus += 50;					
 				}
 			}
 		break;
 
 		case 3:
 			drawText("PROPERTY DAMAGE", 0, 3, false);
-			drawDecimal(propDamageFloor, 7, 4);
+			drawDecimal(propDamageFloor, 4);
 			
 			if (++bonusTimer > 1) {
-				//music.PlayTrack(15);
+				music.PlayTrack(15);
 				bonusTimer = 0;
 				if (propDamageFloor < 1) {
 					playAudio("audio/cash.wav", 100);
@@ -2281,7 +2432,7 @@ void elevatorLogic() {
 				}	
 				else {
 					propDamageFloor--;			
-					levelBonus += 100;					
+					levelBonus += 10;					
 				}
 			}		
 		break;
@@ -2304,7 +2455,7 @@ void elevatorLogic() {
 				drawDecimal(seconds, 9, 4);
 			}
 			
-			//music.PlayTrack(15);
+			music.PlayTrack(15);
 
 			seconds--;
 			levelBonus += 5;
@@ -2312,18 +2463,15 @@ void elevatorLogic() {
 				seconds = 59;
 				if (--minutes < 0) {
 					playAudio("audio/cash.wav", 100);
-					bonusPhase = 5;
-					score += levelBonus;
+					bonusPhase = 5;					
 					menuTimer = 50;
 				}
 			}
 		break;
 		
-		case 5:
-			//music.StopTrack(15);
-			drawText("  TOTAL SCORE", 0, 10, false);
-			drawDecimal(score, 5, 11);				
+		case 5:		
 			if (--menuTimer < 1) {
+				score += levelBonus;		//Actually add the bonus to the score, then next level
 				nextFloor();
 			}		
 		break;		
@@ -2333,9 +2481,10 @@ void elevatorLogic() {
 	
 	drawText("               ", 0, 7, false);
 	drawText("  LEVEL BONUS", 0, 6, false);
-	drawDecimal(levelBonus, 5, 7);	
+	drawDecimal(levelBonus, 7);	
 	
-
+	drawText("  TOTAL SCORE", 0, 13, false);
+	drawDecimal(score + levelBonus, 14);		//Draw score + bonus but don't actually add it til the end
 	
 	
 }
@@ -2527,7 +2676,7 @@ void storyLogic() {
 				cutAnimate = 0;
 			}
 			
-			if (++cutSubAnimate == 20 && explosionCount < 5) {
+			if (++cutSubAnimate == 20 && explosionCount < 6) {
 				cutSubAnimate = 0;
 				budX = random(72, 96);
 				budY = random(8, 44);
@@ -2672,6 +2821,7 @@ void nextFloor() {
 	
 	currentCondo = 0;			//Bud hasn't entered a condo
 
+	budPower = powerMax;
 	hallwayBudSpawn = 10;		//Bud from elevator
 
 	levelBonus = 0;
@@ -2681,6 +2831,8 @@ void nextFloor() {
 	propDamageFloor = 0;			//Total per floor (added to on condo clear)
 	robotKill = 0;					//Per condo
 	robotKillFloor = 0;				//Total per floor (added to on condo clear)	
+
+	levelScore = score;				//Save last score at level (when saving, this is what you revert to)
 
 	stopWatchClear();
 	switchGameTo(goHallway);
@@ -2693,7 +2845,7 @@ void drawBudStats() {
 	drawSprite(12, 4, 0x01F9, 0, false, false);	//X
 	drawSpriteDecimal(budLives, 20, 4, 0);		//lives
 
-	for (int x = 0 ; x < 3 ; x++) {
+	for (int x = 0 ; x < powerMax ; x++) {
 		if (budPower > x) {
 			drawSprite((x << 3) + 4, 14, 0x01FB, 4, false, false);
 		}
@@ -2706,9 +2858,13 @@ void drawBudStats() {
 
 void budDamage() {
 
-	//budPower--;			//Dec power
+	if (budState == entering || budState == exiting) {
+		return;
+	}
 
-	budDir = !budDir;
+	budPower--;			//Dec power
+
+	//budDir = !budDir;
 
 	if (budPower == 0) {	
 		music.StopTrack(currentFloor);				
@@ -2796,23 +2952,26 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 					
 			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
 		
-			if (object[g].animate > 4) {			//Object must be falling at at least half speed to kill a robot
+			if (object[g].animate > 5) {			//Object must be falling at at least half speed to kill a robot
 			
 				bool hit = false;
 				
-				if (currentMap == condo) {				
-					if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
-						hit = true;
-					}
+				// if (currentMap == condo) {				
+					// if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
+						// hit = true;
+					// }
+				// }
+				// else {
+				if (object[index].hitBoxSmall(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
+					hit = true;
 				}
-				else {
-					if (object[index].hitBoxSmall(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
-						hit = true;
-					}
-	
-				}
+				if (object[index].hitBox(object[g].xPos, object[g].yPos, object[g].xPos + (object[g].width << 3), object[g].yPos + (object[g].height << 3)) == true) {
+					hit = true;
+				}	
+
 							
 				if (hit == true) {
+					score += 25;
 					playAudio("audio/glass_1.wav", 90);	//Just the start of this (probably mix with object smash)
 					fallingObjectState[x] = false;		//Remove it from fall list
 					object[g].active = false;			//Destory falling object				
@@ -2948,36 +3107,49 @@ void budLogic2() {
 				}				
 			}
 			else {
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);			//2x2 tile hit box (his ears don't count)
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 6);			//2x2 tile hit box (his ears don't count)
 	
 				if (budDir == false) {			//Right
 					drawSprite(budX, budY, 0 + tail, 31, budPalette, budDir, false);		//Draw animated tail on fours		
 					drawSprite(budX + 8, budY, 7, 18, budPalette, budDir, false);		//Front feet
 					drawSprite(budX, budY - 8, 6, 17, budPalette, budDir, false);		//Back
-					
-					if (blink < 35) {
-						drawSprite(budX + 8, budY - 8, 7, 17, budPalette, budDir, false);
+
+					if (mewTimer > 0) {
+						mewTimer--;
+						drawSprite(budX + 8, budY - 16, 7, 16 + 8, budPalette, budDir, false);	//Ear tips		
+						drawSprite(budX + 8, budY - 8, 7, 16 + 9, budPalette, budDir, false);	//Mew mouth
 					}
 					else {
-						drawSprite(budX + 8, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
-					}
+						if (blink < 35) {
+							drawSprite(budX + 8, budY - 8, 7, 17, budPalette, budDir, false);
+						}
+						else {
+							drawSprite(budX + 8, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
+						}
 
-					drawSprite(budX + 8, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips					
-					
+						drawSprite(budX + 8, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips					
+					}
 				}
 				else {							//Left
 					drawSprite(budX + 8, budY, 0 + tail, 31, budPalette, budDir, false);		//Draw animated tail on fours		
 					drawSprite(budX, budY, 7, 18, budPalette, budDir, false);		//Front feet
 					drawSprite(budX + 8, budY - 8, 6, 17, budPalette, budDir, false);		//Back
-					
-					if (blink < 35) {
-						drawSprite(budX, budY - 8, 7, 17, budPalette, budDir, false);
+	
+					if (mewTimer > 0) {
+						mewTimer--;
+						drawSprite(budX, budY - 16, 7, 16 + 8, budPalette, budDir, false);	//Ear tips		
+						drawSprite(budX, budY - 8, 7, 16 + 9, budPalette, budDir, false);	//Mew mouth
 					}
 					else {
-						drawSprite(budX, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
-					}
+						if (blink < 35) {
+							drawSprite(budX, budY - 8, 7, 17, budPalette, budDir, false);
+						}
+						else {
+							drawSprite(budX, budY - 8, 6, 16, budPalette, budDir, false);	//Blinking Bud!
+						}
 
-					drawSprite(budX, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips					
+						drawSprite(budX, budY - 16, 7, 16, budPalette, budDir, false);	//Ear tips				
+					}
 				}	
 				if (animateBud) {
 					if (++tail > 2) {
@@ -2998,12 +3170,12 @@ void budLogic2() {
 				}	
 				if (budDir == false) {														//Falling facing right	
 					drawSprite(budX, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);
-					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 6);
 					budMoveRightC(3);
 				}
 				else {				
 					drawSprite(budX - 8, budY - 8, 0, 16 + offset, 3, 2, budPalette, budDir, false);	//Falling facing left
-					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 					budMoveLeftC(3);
 				}		
 			}
@@ -3011,12 +3183,12 @@ void budLogic2() {
 	
 				if (budDir == false) {		
 					drawSprite(budX, budY - 8, 0, 16 + (budFrame << 1), 3, 2, budPalette, budDir, false);	//Running
-					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 8);
+					setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 24, budWorldY + 6);
 					budMoveRightC(3);		
 				}
 				else {				
 					drawSprite(budX - 8, budY - 8, 0, 16 + (budFrame << 1), 3, 2, budPalette, budDir, false);	//Running
-					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+					setBudHitBox(budWorldX - 8, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 					budMoveLeftC(3);		
 				}
 				if (animateBud) {
@@ -3030,12 +3202,12 @@ void budLogic2() {
 		case swiping:
 			if (budDir == true) {			//Left
 				drawSprite(budX - 16, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 				setBudAttackBox(budWorldX - 16, budWorldY - 12, budWorldX, budWorldY);
 			}
 			else {							//Right
 				drawSprite(budX, budY - 16, 8, 16 + (budSwipe * 3), 4, 3, budPalette, budDir, false);
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 				setBudAttackBox(budWorldX + 16, budWorldY - 12, budWorldX + 32, budWorldY);
 			}	
 			break;
@@ -3043,12 +3215,12 @@ void budLogic2() {
 		case damaged:
 			if (budStunnedDir == true) {	//Stunned rolling left
 				drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, false, false);	//Rolls left, but is facing right, rolling backwards
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 				budMoveLeftC(4);
 			}
 			else {							//Stunned rolling right
 				drawSprite(budX, budY - 8, 14, 16 + (budFrame << 1), 2, 2, budPalette, true, false);
-				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 8);
+				setBudHitBox(budWorldX, budWorldY - 8, budWorldX + 16, budWorldY + 6);
 				budMoveRightC(4);				
 			}
 			if (animateBud) {
@@ -3059,7 +3231,7 @@ void budLogic2() {
 			//stunned count was here
 			break;
 
-		case exiting:		
+		case exiting:			//Coming OUT of a condo or elevator and going INTO hallway	
 			moveSuppress = true;		
 			if (budVisible == true) {
 				drawSprite(budX + 4, budY - 8, 7, 16 + 5, 1, 2, 4, budDir, false);	
@@ -3105,7 +3277,7 @@ void budLogic2() {
 			}			
 			break;
 	
-		case entering:		
+		case entering:					//Going into a condo or elevator
 			moveSuppress = true;		
 			drawSprite(budX + 4, budY - 8, 7, 16 + 3, 1, 2, 4, budDir, false);		
 			if (animateBud) {
@@ -3282,9 +3454,9 @@ void budLogic2() {
 
 		}
 
-		if (button(A_but)) {
-			//playAudio("audio/hitModem.wav", 90);
-			
+		if (button(A_but) && mewTimer == 0) {
+			playAudio("audio/bud_mew.wav", 90);
+			mewTimer = 20;
 			levelComplete = true;
 			elevatorOpen = true;
 			drawHallwayElevator(64);
@@ -3332,7 +3504,7 @@ void budLogic2() {
 			
 		}
 
-		if (checkElevator() == 1 && budState != entering) {								//Bud standing in front of elevator?
+		if (checkElevator() == 1 && budState != entering && budState != exiting) {								//Bud standing in front of elevator?
 			
 			if (elevatorOpen == true) {							//Ready for the next level?
 
@@ -3369,28 +3541,49 @@ bool budMoveLeftC(int speed) {
 	}
 
 	if (condoMoveLeft(speed) == false) {		//Can window NOT scroll left?
-		
-		budX -= speed;
-		budWorldX -= speed;
-		xWindowBudFine -= speed;
-		
-		if (xWindowBudFine < 0) {				//Passed tile boundary?
-			xWindowBudFine += 8;			//Reset fine bud screen scroll
-			
-			xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
-		}	
 
-		if (budX < 8 && currentMap == condo) {
-			if (kittenCount == kittenToRescue) {		//Rescued enough to exit condo
-				exitCondo();
-			}
-			else {
-				if (kittenMessageTimer == 0) {
-					kittenMessageTimer = 60;	
-					playAudio("audio/taunt.wav", 100);
+		if (budY > 56) {			//Bud can move further left than 8px if he's inside the door (to exit or be taunted)
+			budX -= speed;
+			budWorldX -= speed;
+			xWindowBudFine -= speed;
+			
+			if (xWindowBudFine < 0) {				//Passed tile boundary?
+				xWindowBudFine += 8;			//Reset fine bud screen scroll
+				
+				xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
+			}	
+
+			if (budX < 8 && currentMap == condo) {
+				if (kittenCount == kittenToRescue) {		//Rescued enough to exit condo
+					exitCondo();
+				}
+				else {
+					if (kittenMessageTimer == 0) {
+						kittenMessageTimer = 60;	
+						playAudio("audio/taunt.wav", 100);
+					}
 				}
 			}
 		}
+		else {
+
+			if (budX > 8) {
+				budX -= speed;
+				budWorldX -= speed;
+				xWindowBudFine -= speed;
+				
+				if (xWindowBudFine < 0) {				//Passed tile boundary?
+					xWindowBudFine += 8;			//Reset fine bud screen scroll
+					
+					xWindowBudToTile = windowCheckLeft(xWindowBudToTile);
+				}	
+			}
+
+		}
+
+
+		
+
 	}
 	
 	return true;
@@ -3405,15 +3598,19 @@ bool budMoveRightC(int speed) {
 	}
 
 	if (condoMoveRight(speed) == false) {		//Can window NOT scroll right?
-		budX += speed;
-		budWorldX += speed;
-		xWindowBudFine += speed;
 		
-		if (xWindowBudFine > 7) {				//Passed tile boundary?
-			xWindowBudFine -= 8;			//Reset fine bud screen scroll
+		if (budX < 98) {			//Prevent from jumping over right edge of the world (DAMN SPEED RUNNERS!)
+			budX += speed;
+			budWorldX += speed;
+			xWindowBudFine += speed;
 			
-			xWindowBudToTile = windowCheckRight(xWindowBudToTile);
-		}			
+			if (xWindowBudFine > 7) {				//Passed tile boundary?
+				xWindowBudFine -= 8;			//Reset fine bud screen scroll
+				
+				xWindowBudToTile = windowCheckRight(xWindowBudToTile);
+			}		
+		}
+	
 	}
 	
 	return true;
@@ -3576,7 +3773,7 @@ int budTileCheck(int whereTo) {
 	
 }
 
-void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
+void setBudHitBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {		//Low side -2 pixels so robots passing under don't kill Bud (his ears at rest also null)
 	
 	budWx1 = x1;
 	budWy1 = y1;	
