@@ -53,7 +53,7 @@ class gameObject
 	bool extraY = false;
 			
 	uint8_t stunTimer = 0;
-	uint8_t extraB = 0;
+	uint8_t speedPixels = 1;
 	uint8_t extraC = 0;
 	uint8_t extraD = 0;	
 	

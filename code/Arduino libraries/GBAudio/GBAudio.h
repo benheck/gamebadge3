@@ -22,6 +22,7 @@
 #define SAMPLE_RATE         15625
 #define PHASE_1HZ           4.194304
 #define WAVE_TIMER          -64
+#define HERTZ60		        -16666
 #define AUDIO_TIMER         -16666
 #define CHANNELS            4
 

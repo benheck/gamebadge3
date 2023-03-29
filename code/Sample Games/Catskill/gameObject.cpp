@@ -159,14 +159,16 @@ void gameObject::scan(uint16_t worldX, uint16_t worldY) {
 				}
 				
 				if (dir == false) {
-					if (++xPos > (xSentryRight - (width * 8))) {		//Sub robot width from right edge, since we are checking left edge of robot xPos
+					xPos += speedPixels;
+					if (xPos > (xSentryRight - (width * 8))) {		//Sub robot width from right edge, since we are checking left edge of robot xPos
 						dir = true;
 						turning = true;
 						animate = 4;
 					}
 				}
 				else {
-					if (--xPos < (xSentryLeft)) {
+					xPos -= speedPixels;
+					if (xPos < (xSentryLeft)) {
 						dir = false;
 						turning = true;
 						animate = 4;					

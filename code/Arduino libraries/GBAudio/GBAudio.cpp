@@ -32,7 +32,7 @@ GBAudio::GBAudio()
 
 void GBAudio::ProcessWaveforms()				//Called really fast (64us minimum)
 {   
-	gpio_put(15, 1);
+	//gpio_put(15, 1);
 	
     byte s1 = 0, s2 = 0, tri = 0;
     word noise = 0, dpcm = 0;
@@ -58,7 +58,7 @@ void GBAudio::ProcessWaveforms()				//Called really fast (64us minimum)
     pwm_set_freq_music(2, NESDACTriNoiseDMCLUT[tri + noise] * 2);
     pwm_set_freq_music(3, NESDACTriNoiseDMCLUT[dpcm]);	
 	
-	gpio_put(15, 0);
+	//gpio_put(15, 0);
 }
 
 void GBAudio::ServiceTracks()

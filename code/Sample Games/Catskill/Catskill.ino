@@ -299,8 +299,6 @@ int cutSubAnimate2 = 0;
 int whichScene = 0;					//Which cutscene frame to show
 int explosionCount = 0;
 
-int stunTimeStart = 90;
-
 int saveSlots[3] = {0, 0, 0};		//0 = no save data, 1 = save data exists
 
 bool loadFlag = false;
@@ -313,6 +311,10 @@ int gameLoopState = 0;
 int mewTimer = 0;						//Bud mewing for no reason. Just like real life!
 
 int difficulty = 2;						//1= Kitten 2 = Cat 3 = Dark Souls of Pumas
+int robotSpeed = 1;						//Diff 3 speed = 2 else 1
+int stunTimeStart = 90;					//70 = hard 90 normal 110 easy
+
+bool levelCheat = false;
 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
@@ -447,27 +449,6 @@ void gameLoopLogic() {
 }
 
 void gameFrame() {
-	
-	// if (displayPauseState == true) {			//Pause? Do no logic
-		// return;
-	// }
-	
-	// if (displayPauseState == false) {				//If the display is being actively refreshed we need to wait before accessing video RAM
-		
-		// // while(frameDrawing == false) {			//Wait for Core 1 to begin rendering the frame
-			// // delayMicroseconds(1);				//Do almost nothing (arduino doesn't like empty while()s)
-		// // }
-		// //OK we now know that Core1 has started drawing a frame. We can now do any game logic that doesn't involve accessing video memory
-	
-		//serviceAudio();
-
-		// //Controls, file access, Wifi etc...
-		
-		// // while(frameDrawing == true) {			//OK we're done with our non-video logic, so now we wait for Core 1 to finish drawing
-			// // delayMicroseconds(1);
-		// // }
-		// //OK now we can access video memory. We have about 15ms in which to do this before the next frame starts--------------------------
-	// }
 
 	switch(gameState) {
 
@@ -548,18 +529,20 @@ void gameFrame() {
 			
 			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
-			if (button(left_but)) {
-				if (--currentFloor < 1) {
-					currentFloor = 6;
+			if (levelCheat == true) {
+				if (button(left_but)) {
+					if (--currentFloor < 1) {
+						currentFloor = 6;
+					}
 				}
-			}
-			if (button(right_but)) {
-				if (++currentFloor > 6) {
-					currentFloor = 1;
-				}
-			}	
+				if (button(right_but)) {
+					if (++currentFloor > 6) {
+						currentFloor = 1;
+					}
+				}	
 
-			tileDirect(cursorX, 8, (((currentFloor - 1) * 16) + 128) + 15);
+				tileDirect(12, 8, (((currentFloor - 1) * 16) + 128) + 15);				
+			}
 
 			if (button(up_but)) {
 				if (cursorY > 9) {
@@ -575,7 +558,11 @@ void gameFrame() {
 					//music.PlayTrack(15);
 					//pwm_set_freq_duty(6, 520, 25);
 					soundTimer = 10;
-				}				
+				}	
+				if (button(C_but)) {
+					levelCheat = true;					
+				}
+				
 			}
 			
 			if (button(A_but)) {
@@ -591,7 +578,7 @@ void gameFrame() {
 					break;
 					
 					case 11:
-						editType = true;			//Press A to edit condo
+						editType = true;			//Press A to edit condos 1-6, 1-6
 						switchGameTo(levelEdit);
 					break;
 					
@@ -600,12 +587,14 @@ void gameFrame() {
 					break;				
 				}		
 			}
-			if (button(B_but) && cursorY == 11) {
-				menuTimer = 0;				
-				editType = false;					//Press B to edit hallway
-				cutscene = true;					//Don't pre-draw doors or anything
-				switchGameTo(levelEdit);	
-			}
+			
+			// if (button(B_but) && cursorY == 11) {		//DEV MODE - DISABLE
+				// menuTimer = 0;				
+				// editType = false;					//Press B to edit hallway
+				// cutscene = true;					//Don't pre-draw doors or anything
+				// switchGameTo(levelEdit);	
+			// }
+
 			//TIMER TO ATTRACT
 			//SELECT START
 		break;
@@ -731,13 +720,6 @@ void gameFrame() {
 
 
 	
-	if (soundTimer > 0) {
-		if (--soundTimer == 0) {
-			pwm_set_freq_duty(6, 0, 0);
-		}
-	}
-
-	
 }
 
 void switchGameTo(stateMachineGame x) {		//Switches state of game
@@ -822,7 +804,7 @@ void drawTitleScreen() {
 	
 	setButtonDebounce(A_but, true, 1);
 	setButtonDebounce(B_but, true, 1);
-	setButtonDebounce(C_but, true, 1);
+	setButtonDebounce(C_but, false, 0);
 	
 	menuTimer = random(50, 150);
 	cursorTimer = 0;
@@ -979,8 +961,8 @@ void setupSave() {
 			
 	setWindow(0, 0);
 			//0123456789ABCDE
-	drawText("    SELECT", 0, 4, false);			
-	drawText("  SAVE SLOT", 0, 5, false);
+	drawText("     SELECT", 0, 4, false);			
+	drawText("   SAVE SLOT", 0, 5, false);
 
 	drawText("SLOT 1", 6, 7, false);
 	drawText("SLOT 2", 6, 8, false);
@@ -1052,7 +1034,7 @@ void saveLogic() {
 	}	
 
 	if (saveSlots[cursorY - 7] == 1) {		
-		drawText("  OVERWRITE?", 0, 11, false);	
+		drawText(" A=OVERWRITE", 0, 11, false);	
 	}
 	else {
 		drawText("            ", 0, 11, false);
@@ -1160,6 +1142,15 @@ void loadGameFile(int slot) {
 	difficulty = readByte();
 	
 	powerMax = 5 - difficulty;
+	if (difficulty == 3) {
+		robotSpeed = 2;
+	}
+	else {
+		robotSpeed = 1;
+	}
+	
+	stunTimeStart = (130 - (difficulty * 20));		//70 = hard 90 normal 110 easy
+	
 	//Load the last level score
 	
 	levelScore = 0;	
@@ -1209,7 +1200,11 @@ void setupDiffSelect() {
 	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
 	
-	music.PlayTrack(12, false);
+	budDir = false;
+	menuTimer = 0;
+	budY = 0;
+	
+	music.PlayTrack(12, true);
 	
 }
 
@@ -1231,21 +1226,35 @@ void diffSelectLogic() {
 	switch(difficulty) {
 		
 		case 1:
-			drawSprite(28, 28, 0, 16, 8, 8, 4, false, false);
+			drawSprite(28, 28 + budY, 0, 16, 8, 8, 4, false, false);
 			drawText("     KITTEN", 0, 13, false);
 		break;
 		
 		case 2:
-			drawSprite(28, 28, 8, 16, 8, 8, 4, false, false);
+			drawSprite(28, 28 + budY, 8, 16, 8, 8, 4, false, false);
 			drawText("      CAT", 0, 13, false);
 		break;
 			        //0123456789ABCDE				//Draw score centered			
 		case 3:
-			drawSprite(28, 28, 0, 16 + 8, 8, 8, 4, false, false);
+			drawSprite(28, 28 + budY, 0, 16 + 8, 8, 8, 4, false, false);
 			drawText("THE DARK SOULS", 0, 13, false);
 			drawText("   OF PUMAS", 0, 14, false);
 		break;
 		
+	}
+
+	if (++menuTimer == 5) {
+		menuTimer = 0;
+		if (budDir == false) {
+			if (++budY == 3) {
+				budDir = true;
+			}
+		}
+		else {
+			if (--budY == 0) {
+				budDir = false;
+			}		
+		}	
 	}
 
 	bool changed = false;
@@ -1291,6 +1300,15 @@ void startNewGame() {
 	
 	powerMax = 5 - difficulty;
 	
+	if (difficulty == 3) {
+		robotSpeed = 2;
+	}
+	else {
+		robotSpeed = 1;
+	}
+	
+	stunTimeStart = (130 - (difficulty * 20));		//70 = hard 90 normal 110 easy
+	
 	loadFlag = false;				//NEW GAME				
 	whichScene = 0;
 	music.PlayTrack(0, false);
@@ -1313,11 +1331,11 @@ void setupGameOver() {
 	
 	drawText("   GAME OVER", 0, 2, false);
 
-	drawText("  CONTINUE", 0, 4, false);
-	drawText("  SAVE PROGRESS", 0, 5, false);
-	drawText("  QUIT TO MENU", 0, 6, false);
+	drawText("  CONTINUE", 0, 6, false);
+	drawText("  SAVE PROGRESS", 0, 7, false);
+	drawText("  QUIT TO MENU", 0, 8, false);
 
-	cursorY = 4;
+	cursorY = 6;
 	cursorTimer = 0;
 	cursorAnimate = 0x0C;
 
@@ -1333,7 +1351,7 @@ void setupGameOver() {
 
 void gameOverLogic() {
 
-	fillTiles(1, 4, 1, 6, ' ', 0);					//Erase arrows
+	fillTiles(1, 6, 1, 8, ' ', 0);					//Erase arrows
 	
 	drawTile(1, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
@@ -1346,7 +1364,7 @@ void gameOverLogic() {
 	}
 
 	if (button(up_but)) {
-		if (cursorY > 4) {
+		if (cursorY > 6) {
 			cursorY--;
 			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 493, 25);
@@ -1354,7 +1372,7 @@ void gameOverLogic() {
 		}				
 	}
 	if (button(down_but)) {
-		if (cursorY < 6) {
+		if (cursorY < 8) {
 			cursorY++;
 			//music.PlayTrack(15);
 			//pwm_set_freq_duty(6, 520, 25);
@@ -1368,15 +1386,15 @@ void gameOverLogic() {
 		
 		menuTimer = 0;
 		switch(cursorY) {					
-			case 4:		
+			case 6:		
 				continueLevel();				
 			break;
 			
-			case 5:
+			case 7:
 				switchGameTo(saveGame);
 			break;
 
-			case 6:
+			case 8:
 				switchGameTo(titleScreen);				
 			break;				
 		}		
@@ -1597,6 +1615,10 @@ void setupCondo(int whichFloor, int whichCondo) {
 	setButtonDebounce(left_but, false, 0);
 	setButtonDebounce(right_but, false, 0);
 	
+	setButtonDebounce(A_but, true, 1);
+	setButtonDebounce(B_but, true, 1);
+	setButtonDebounce(C_but, true, 1);
+	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
 	setWindow(0, 0);
@@ -1681,6 +1703,8 @@ void setupCondo(int whichFloor, int whichCondo) {
 	kittenMessageTimer = 90;
 
 	budStunned = 0;
+	
+	movingObjects(true);			//Tell robots to move
 
 	if (music.IsTrackPlaying(currentFloor) == false) {
 		music.PlayTrack(currentFloor, true);
@@ -1880,7 +1904,13 @@ void setupHallway() {
 	setButtonDebounce(left_but, false, 0);
 	setButtonDebounce(right_but, false, 0);
 	
+	setButtonDebounce(A_but, true, 1);
+	setButtonDebounce(B_but, true, 1);
+	setButtonDebounce(C_but, true, 1);	
+	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
+
+	budDir = false;		//Always spawns facing right
 
 	switch(hallwayBudSpawn) {
 	
@@ -1893,8 +1923,7 @@ void setupHallway() {
 					
 					
 		case 11:				//Spawn in front of elevator (if died in hallway)
-			budSpawned = true;
-			budDir = false;		
+			budSpawned = true;	
 			budFrame = 0;
 			budVisible = false;
 			budState = rest;
@@ -1903,8 +1932,7 @@ void setupHallway() {
 			break;					
 					
 		case 10:			//Emerge from elevator (stage 2-6)
-			budSpawned = true;
-			budDir = false;		
+			budSpawned = true;	
 			elevatorOpen = false;
 			budState = exiting;
 			budExitingWhat = 2;			//exiting elevator
@@ -1952,11 +1980,11 @@ void setupHallway() {
 	populateEditDoors();			//Redraw stuff that changes (door #'s, door open close, etc)
 	drawHallwayElevator(64);
 
-	movingObjects(true);
+	movingObjects(true);			//Tell all objects they can move
 
 	redrawMapTiles();					//Reload what's visible
 
-	robotsToSpawn = 20; //currentFloor;	//How many robots spawn in the hallway (same as floor #)
+	robotsToSpawn = currentFloor;	//How many robots spawn in the hallway (same as floor #)
 	robotsSpaceTimer = 90;			//Time between robot spawns, in ticks
 
 	displayPause(false);   		//Allow core 2 to draw
@@ -2032,6 +2060,10 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 	drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
 	drawBudStats();
 
+	if (budState == entering) {		//If Bud is entering elevator or condo, draw robots first so they appear in front of him
+		objectLogic();		
+	}
+
 	if (budSpawned == true) {
 		budLogic2();
 	}
@@ -2084,6 +2116,10 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 			
 			int robot = placeObjectInMap(x, 64, 0, 48 + 0, 2, 6, 4 + random(0, 4), dir, 0, 0);
 			
+			//ADD RANDOM ROBOTS BJH
+
+			object[robot].speedPixels = robotSpeed;
+			
 			object[robot].xSentryLeft = 8;
 			object[robot].xSentryRight = 1080;	
 			object[robot].moving = true;		//Move robot
@@ -2091,7 +2127,9 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 		}
 	}
 
-	objectLogic();
+	if (budState != entering) {		//Default draw Bud first so he appears over things like chandeliers
+		objectLogic();		
+	}
 
 }
 
@@ -2368,6 +2406,12 @@ void setupElevator() {
 	seconds = 48;
 	minutes = 1;
 
+	//drawText("0123456789ABCDE", 0, 0, false);
+	drawText(" FLOOR X CLEAR", 0, 0, false);
+	drawDecimal(currentFloor, 7, 0);
+
+	kittenMessageTimer = 0;			//Bug only in testing but fix it anyway
+
 	isDrawn = true;	
 	displayPause(false);
 
@@ -2376,13 +2420,13 @@ void setupElevator() {
 
 void elevatorLogic() {
 
-	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
+	fillTiles(0, 5, 14, 14, ' ', 0);			//Clear area
 
 	switch(bonusPhase) {
 	
 		case 1:
-			drawText(" KITTENS SAVED", 0, 3, false);
-			drawDecimal(kittenFloor, 4);
+			drawText(" KITTENS SAVED", 0, 5, false);
+			drawDecimal(kittenFloor, 6);
 
 			if (++bonusTimer > 1) {
 				music.PlayTrack(15);
@@ -2400,8 +2444,8 @@ void elevatorLogic() {
 		break;	
 	
 		case 2:
-			drawText("ROBOTS  SMASHED", 0, 3, false);
-			drawDecimal(robotKillFloor, 4);
+			drawText("ROBOTS  SMASHED", 0, 5, false);
+			drawDecimal(robotKillFloor, 6);
 
 			if (++bonusTimer > 1) {
 				music.PlayTrack(15);
@@ -2419,8 +2463,8 @@ void elevatorLogic() {
 		break;
 
 		case 3:
-			drawText("PROPERTY DAMAGE", 0, 3, false);
-			drawDecimal(propDamageFloor, 4);
+			drawText("PROPERTY DAMAGE", 0, 5, false);
+			drawDecimal(propDamageFloor, 6);
 			
 			if (++bonusTimer > 1) {
 				music.PlayTrack(15);
@@ -2438,21 +2482,21 @@ void elevatorLogic() {
 		break;
 		
 		case 4:
-			drawText("  TIME BONUS   ", 0, 3, false);
-			drawText("00:00 ", 5, 4, false);
+			drawText("  TIME BONUS   ", 0, 5, false);
+			drawText("00:00 ", 5, 6, false);
 			
 			if (minutes > 9) {
-				drawDecimal(minutes, 5, 4);
+				drawDecimal(minutes, 5, 6);
 			}
 			else {
-				drawDecimal(minutes, 6, 4);
+				drawDecimal(minutes, 6, 6);
 			}
 
 			if (seconds > 9) {
-				drawDecimal(seconds, 8, 4);
+				drawDecimal(seconds, 8, 6);
 			}
 			else {
-				drawDecimal(seconds, 9, 4);
+				drawDecimal(seconds, 9, 6);
 			}
 			
 			music.PlayTrack(15);
@@ -2480,8 +2524,8 @@ void elevatorLogic() {
 	}
 	
 	drawText("               ", 0, 7, false);
-	drawText("  LEVEL BONUS", 0, 6, false);
-	drawDecimal(levelBonus, 7);	
+	drawText("  LEVEL BONUS", 0, 8, false);
+	drawDecimal(levelBonus, 9);	
 	
 	drawText("  TOTAL SCORE", 0, 13, false);
 	drawDecimal(score + levelBonus, 14);		//Draw score + bonus but don't actually add it til the end
@@ -2989,8 +3033,17 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 void movingObjects(bool state) {
 	
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
-		if (object[x].active == true) {		//If object exists and is a robot, turn movement on/off
+		if (object[x].active == true) {				//If object exists and is a robot, turn movement on/off
 			object[x].moving = state;
+			
+			if (difficulty == 3) {
+				object[x].speedPixels = 2;
+			}
+			else {
+				object[x].speedPixels = 1;
+			}
+			
+			
 		}
 	}	
 	
@@ -4087,6 +4140,8 @@ void setupEdit() {
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
+	editWindowX = 0;
+
 	cursorMoveTimer = 0;
 	
 	currentFloor = 1;			//Default edit start
@@ -4256,7 +4311,7 @@ void populateEditDoors() {
 
 void drawEditMenuPopUp() {
 
-	fillTiles(0, 0, 14, 8, ' ', 3);			//Clear area
+	fillTiles(0, 0, 14, 8, ' ', 0);			//Clear area
 
 	if (cursorBlink & 0x01) {
 		drawText(">", 0, editMenuSelectionY, false);		
@@ -4266,7 +4321,8 @@ void drawEditMenuPopUp() {
 	drawDecimal(currentCopyBuffer, 14, 0);	
 	drawText("PASTE + SLOT", 1, 1, false);	
 	drawDecimal(currentCopyBuffer, 14, 1);	
-	drawText("UNDO LAST", 1, 2, false);
+			//0123456789ABCDE
+	drawText("--FILE SYSTEM--", 1, 2, false);
 	drawText("CHANGE FLOOR", 1, 3, false);
 	tileDirect(14, 3, fileNameFloor);
 	drawText("CHANGE ROOM", 1, 4, false);
@@ -4380,6 +4436,7 @@ void drawEditMenuPopUp() {
 			
 			case 6:		//Load
 				loadLevel();
+				editWindowX = 0;
 				manualAdebounce = true;
 			break;				
 
@@ -5165,7 +5222,7 @@ void testAnimateObjects(bool onOff) {
 
 	fallListClear();
 
-	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+	for (int x = 0 ; x < maxThings ; x++) {			//Scan all possible
 		if (object[x].active == true && object[x].category == 0) {		//If object exists and is a robot, turn movement on/off
 			object[x].moving = onOff;
 		}
@@ -5175,7 +5232,7 @@ void testAnimateObjects(bool onOff) {
 
 void clearObjects() {
 
-	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+	for (int x = 0 ; x < maxThings ; x++) {			//Clear all
 		object[x].active = false;
 		object[x].state = 0;	
 		object[x].subAnimate = 0;
@@ -5616,7 +5673,7 @@ void saveObject(int which) {
 	writeBool(object[which].extraY);
 			
 	writeByte(object[which].stunTimer);	
-	writeByte(object[which].extraB);	
+	writeByte(object[which].speedPixels);	
 	writeByte(object[which].extraC);	
 	writeByte(object[which].extraD);	
 	
@@ -5658,7 +5715,7 @@ void loadObject(int which) {
 	object[which].extraY = readBool();
 			
 	object[which].stunTimer = readByte();		
-	object[which].extraB = readByte();		
+	object[which].speedPixels = readByte();		
 	object[which].extraC = readByte();		
 	object[which].extraD = readByte();		
 	
