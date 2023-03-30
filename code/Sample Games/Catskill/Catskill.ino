@@ -38,8 +38,8 @@ int budY = 8;
 
 int budSwipe = 99;							//0 = not swiping, 1 2 3 swipe cycle
 
-uint16_t budWorldX = 8 * (6 + 7);			//Bud's position in the world (not the same as screen or tilemap)
-uint16_t budWorldY = 8;
+int16_t budWorldX = 8 * (6 + 7);			//Bud's position in the world (not the same as screen or tilemap)
+int16_t budWorldY = 8;
 
 uint16_t budWx1, budWx2, budWy1, budWy2;	//Upper left and lower right edge of Bud's hit box. It changes depending on what he's doing
 
@@ -59,8 +59,8 @@ int velocikitten = 0;
 uint16_t level[levelWidth];
 uint16_t xStripDrawing = 0;					//Which strip we're currently drawing
 
-uint16_t worldX = 6 * 8;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
-uint16_t worldY = 0;
+int16_t worldX = 6 * 8;					//Where the camera is positioned in the world (not the same as tilemap as that's dynamic)
+int16_t worldY = 0;
 
 int xWindowFine = 0;						//The fine scrolling amount
 int8_t xWindowCoarse = 6;				//In the tilemap, the left edge of the current positiom (coarse)
@@ -126,7 +126,7 @@ int lastAdded = 0xFF;
 bool gameActive = false;
 bool isDrawn = false;													//Flag that tells new state it needs to draw itself before running logic
 
-enum stateMachineGame { bootingMenu, splashScreen, titleScreen, diffSelect, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode};					//State machine of the game (under stateMachine = game)
+enum stateMachineGame { bootingMenu, splashScreen, titleScreen, diffSelect, levelEdit, saveGame, loadGame, game, story, goHallway, goCondo, goJail, goElevator, gameOver, pauseMode, theEnd};					//State machine of the game (under stateMachine = game)
 stateMachineGame gameState = bootingMenu;
 
 enum stateMachineEdit { tileDrop, tileSelect, objectDrop, objectSelect };					//State machine of the game (under stateMachine = game)
@@ -282,6 +282,7 @@ int robotKill = 0;					//Per condo
 int robotKillTotal = 0;				//Total per game (added on level win)
 int robotKillFloor = 0;				//Total per floor (added to on condo clear)
 
+bool bonusPause = false;
 int bonusPhase = 0;
 int bonusTimer = 0;
 long levelBonus = 0;
@@ -316,6 +317,17 @@ int stunTimeStart = 90;					//70 = hard 90 normal 110 easy
 
 bool levelCheat = false;
 
+int kittyBonus = 0;
+int robotBonus = 0;
+int propBonus = 0;
+
+bool waitPriorityChange = false;		//Used to fix one bug, I don't give a shit at this point
+
+int bestTime[6][2] = { {3, 30}, {3, 40}, { 4, 15 }, { 4, 15 }, { 4, 20 }, {4, 30} };
+
+int floorSeconds;				//Turn dumb minutes/seconds into seconds
+int timeBonus;					//Pre-calc bonus for time (thanks CHAT-GPT, our new overlord masters)
+
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
@@ -342,9 +354,11 @@ void setup() { //------------------------Core0 handles the file system and game 
 	music.AddTrack(saveLoad, 10);
 	music.AddTrack(game_over, 11);
 	music.AddTrack(selection, 12);
+	music.AddTrack(end_music, 13);
 	
 	music.AddTrack(ping, 15);
 	
+	//Serial.begin(115200);
 	
 }
 
@@ -525,7 +539,7 @@ void gameFrame() {
 				}
 			}
 			
-			fillTiles(cursorX, 9, cursorX, 12, '@', 0);					//Erase arrows
+			fillTiles(cursorX, 10, cursorX, 13, '@', 0);					//Erase arrows
 			
 			drawTile(cursorX, cursorY, cursorAnimate, 0, 0);			//Animated arrow
 
@@ -541,11 +555,11 @@ void gameFrame() {
 					}
 				}	
 
-				tileDirect(12, 8, (((currentFloor - 1) * 16) + 128) + 15);				
+				tileDirect(12, 9, (((currentFloor - 1) * 16) + 128) + 15);				
 			}
 
 			if (button(up_but)) {
-				if (cursorY > 9) {
+				if (cursorY > 10) {
 					cursorY--;
 					//music.PlayTrack(15);
 					//pwm_set_freq_duty(6, 493, 25);
@@ -553,7 +567,7 @@ void gameFrame() {
 				}				
 			}
 			if (button(down_but)) {
-				if (cursorY < 12) {
+				if (cursorY < 13) {
 					cursorY++;
 					//music.PlayTrack(15);
 					//pwm_set_freq_duty(6, 520, 25);
@@ -569,20 +583,21 @@ void gameFrame() {
 				menuTimer = 0;
 				music.StopTrack(9);				//In case title music is playing
 				switch(cursorY) {					
-					case 9:		
+					case 10:		
 						switchGameTo(diffSelect);		//New game, start by selecting difficulty					
 					break;
 					
-					case 10:
+					case 11:
+						//switchGameTo(theEnd);
 						switchGameTo(loadGame);
 					break;
 					
-					case 11:
+					case 12:
 						editType = true;			//Press A to edit condos 1-6, 1-6
 						switchGameTo(levelEdit);
 					break;
 					
-					case 12:
+					case 13:
 						switchGameTo(pauseMode);				
 					break;				
 				}		
@@ -702,6 +717,13 @@ void gameFrame() {
 				displayPause(true);			//and then pause on next frame
 			}	
 			break;	
+
+		case theEnd:
+			if (isDrawn == false) {
+				setupEnding();
+			}
+			endingLogic();
+			break;
 						
 		break;
 		
@@ -789,11 +811,16 @@ void drawTitleScreen() {
 		}		
 	}
 
+	for (int g = 0 ; g < 5 ; g++) {
+		
+		tileDirect(10 + g, 8, 0xD8 + g);
+	}
 
-	drawText("start", 10, 9, false);
-	drawText("load", 10, 10, false);	
-	drawText("edit", 10, 11, false);		
-	drawText("usb", 10, 12, false);	
+
+	drawText("start", 10, 10, false);
+	drawText("load", 10, 11, false);	
+	drawText("edit", 10, 12, false);		
+	drawText("usb", 10, 13, false);	
 
 	setWindow(0, 0);
 	
@@ -809,8 +836,10 @@ void drawTitleScreen() {
 	menuTimer = random(50, 150);
 	cursorTimer = 0;
 	cursorX = 9;
-	cursorY = 9;
+	cursorY = 10;
 	cursorAnimate = 0x8A;
+					
+	currentFloor = 1;			//This is where we start. We don't define it in startGame else the cheat in the menu wouldn't work. BUT we have to reset it here else game will start on last active level #				
 					
 	isDrawn = true;	
 	displayPause(false);
@@ -1034,7 +1063,7 @@ void saveLogic() {
 	}	
 
 	if (saveSlots[cursorY - 7] == 1) {		
-		drawText(" A=OVERWRITE", 0, 11, false);	
+		drawText("A=OVERWRITE", 2, 11, false);	
 	}
 	else {
 		drawText("            ", 0, 11, false);
@@ -1307,6 +1336,8 @@ void startNewGame() {
 		robotSpeed = 1;
 	}
 	
+	levelComplete = false;
+	
 	stunTimeStart = (130 - (difficulty * 20));		//70 = hard 90 normal 110 easy
 	
 	loadFlag = false;				//NEW GAME				
@@ -1422,6 +1453,16 @@ void continueLevel() {
 	budLives = 3;
 	budPower = powerMax;
 	budStunned = 0;
+	
+	stopWatchClear();
+		
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		apartmentState[x] = 0;
+	}	
+	levelComplete = false;
+	
+	currentCondo = 0;			//Bud hasn't entered a condo
+	
 	hallwayBudSpawn = 11;		//Continue spawns in front of closed elevator
 	switchGameTo(goHallway);	//Spawn
 	
@@ -1444,7 +1485,7 @@ void startGame() {
 
 	//currentFloor = 1;			//Setup game here
 	currentCondo = 0;			//Bud hasn't entered a condo
-	budLives = 1;
+	budLives = 3;
 	budPower = powerMax;
 	hallwayBudSpawn = 0;		//Bud jumps through glass
 
@@ -1457,9 +1498,10 @@ void startGame() {
 	
 	stopWatchClear();
 	
-	for (int x = 0 ; x < 6 ; x++) {
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
 		apartmentState[x] = 0;
-	}
+	}	
+	levelComplete = false;
 	
 	breakWindow = true;
 	
@@ -1489,6 +1531,11 @@ void resumeGame() {
 	budStunned = 0;
 
 	elevatorOpen = false;		//Level starting (if die in hallway, spawn in front of closed elevator)
+	
+	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
+		apartmentState[x] = 0;
+	}	
+	levelComplete = false;
 	
 	stopWatchClear();
 		
@@ -1791,9 +1838,13 @@ void condoLogic() {
 	}
 
 	stopWatchTick();	
+
+	//drawSpriteDecimal(minutes, 80, 0, 4);
+	//drawSpriteDecimal(seconds, 100, 0, 6);
+
 	
-	// drawSpriteDecimal(kittenTotal, 80, 8, 0);
-	// drawSpriteDecimal(robotKillTotal, 80, 16, 0);
+	// drawSpriteDecimal(budWorldX, 80, 8, 0);
+	// drawSpriteDecimal(worldX, 80, 16, 0);
 	// drawSpriteDecimal(propDamageTotal, 80, 24, 0);
 
 	//drawSpriteDecimal(budX, 40, 8, 0);
@@ -1812,7 +1863,7 @@ void condoLogic() {
 			// GOTO THE EXIT
 			
 			if (kittenMessageTimer & 0x04) {
-				int offset = 4;
+				int offset = 4;						
 				
 				if ((kittenToRescue - kittenCount) > 9) {
 					offset = 0;
@@ -1826,9 +1877,12 @@ void condoLogic() {
 					drawSpriteDecimal(kittenToRescue - kittenCount, 84 + offset, 52, 3);		//Delta of kittens to save
 					
 					if (kittenCount == (kittenToRescue - 1)) {		//Only one KITTENS left? Draw a sloppy slash over the S
-						drawSpriteText("      /", 36, 60, 3);	
-					}				
-					drawSpriteText("KITTENS", 36, 60, 3);								
+						drawSpriteText("KITTEN", 36, 60, 3);					
+					}	
+					else {
+						drawSpriteText("KITTENS", 36, 60, 3);						
+					}
+													
 				}
 			}	
 			kittenMessageTimer--;
@@ -1846,7 +1900,7 @@ void condoLogic() {
 		}
 	}
 
-	drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
+	//drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
 	drawBudStats();
 	budLogic2();
 
@@ -1950,12 +2004,12 @@ void setupHallway() {
 	
 	}
 	
-	levelComplete = false;
+	//levelComplete = false;
 
 	fileNameFloor = '1';		//Hallway hub is floor 1, condo 0
 	fileNameCondo = '0';
 	updateMapFileName();
-	loadLevel();								//Load hallway level tiles, we will populate objects and redraw doors manually
+	loadLevel();								//Load hallway level tiles (includes Greenies) we will populate objects and redraw doors manually
 
 	placeObjectInMap(152, 0, 4, 32 + 8, 4, 3, 7, true, 1, 50);		//Chandeliers
 	placeObjectInMap(296, 0, 4, 32 + 8, 4, 3, 7, true, 1, 50);
@@ -1964,28 +2018,28 @@ void setupHallway() {
 	placeObjectInMap(760, 0, 4, 32 + 8, 4, 3, 7, true, 1, 50);	
 	placeObjectInMap(904, 0, 4, 32 + 8, 4, 3, 7, true, 1, 50);	
 				
-	entryWindow = placeObjectInMap(32, 48, 4, 32 + 12, 4, 3, 6, true, 10, 5);		//Spawn an intact window and get the index #
+	placeObjectInMap(32, 48, 4, 32 + 12, 4, 3, 6, true, 10, 5, 21);		//Spawn an intact window on object #21
 	
 	if (currentFloor == 1) {						//Broken window only on first floor
-		if (currentCondo > 0) {								//Bud has already been in a condo? (not game opening)
+		if (currentCondo > 0) {						//Bud has already been in a condo? (not game opening)
 			if (currentFloor == 1) {
-				object[entryWindow].sheetX = 0;				//Window was already broken
+				object[21].sheetX = 0;				//Window was already broken, change the above to broken
 			}
 		}				
 	}
 	//Else leave window intact, as it was spawned
 	
-	placeObjectInMap(1025, 48, 4, 32 + 12, 4, 3, 6, true, 10, 5);		//Other window
+	placeObjectInMap(1025, 48, 4, 32 + 12, 4, 3, 6, true, 10, 5, 23);		//Other window spawns as object #23
 	
 	populateEditDoors();			//Redraw stuff that changes (door #'s, door open close, etc)
-	drawHallwayElevator(64);
+	drawHallwayElevator(64);		
 
 	movingObjects(true);			//Tell all objects they can move
 
 	redrawMapTiles();					//Reload what's visible
 
-	robotsToSpawn = currentFloor;	//How many robots spawn in the hallway (same as floor #)
-	robotsSpaceTimer = 90;			//Time between robot spawns, in ticks
+	robotsToSpawn = currentFloor + 1; // * 2;	//How many robots spawn in the hallway (same as floor # + 1)
+	robotsSpaceTimer = 90;			//Starting time between robot spawns, in ticks. Randomly changes after each spawn
 
 	displayPause(false);   		//Allow core 2 to draw
 	isDrawn = true;	
@@ -1993,6 +2047,8 @@ void setupHallway() {
 	if (music.IsTrackPlaying(currentFloor) == false) {
 		music.PlayTrack(currentFloor, true);
 	}
+	
+	waitPriorityChange = false;  //Hacky fix
 	
 }
 
@@ -2035,11 +2091,13 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 	if (displayPauseState == true) {			//Pause? Do no logic
 		return;
 	}
+	
+	highestObjectIndex = 24;					//3 windows + 3 greenies + 6 chandeliers + 7 robots max = 19 objects. Put windows last so robots appear in front of them
 
 	stopWatchTick();
 
-	// drawSpriteDecimal(score, 80, 0, 0);
-	// drawSpriteDecimal(kittenTotal, 80, 8, 0);
+	//drawSpriteDecimal(minutes, 80, 0, 4);
+	//drawSpriteDecimal(seconds, 100, 0, 6);
 	// drawSpriteDecimal(robotKillTotal, 80, 16, 0);
 	// drawSpriteDecimal(propDamageTotal, 80, 24, 0);
 
@@ -2057,7 +2115,7 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 		}
 	}
 
-	drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
+	//drawSpriteDecimalRight(score, 107, 4, 0);		//Right justified score
 	drawBudStats();
 
 	if (budState == entering) {		//If Bud is entering elevator or condo, draw robots first so they appear in front of him
@@ -2073,18 +2131,21 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 			jump = 6;
 			velocikitten = 5;
 
-			object[entryWindow].sheetX = 0;			//Break the existing window
+			object[21].sheetX = 0;					//Break the existing window
 			playAudio("audio/glass_2.wav", 100);
 
-			int glass = placeObjectInMap(32, 40, 0, 32 + 8, 4, 3, 6, true, 10, 6);		//Spawn broken glass	
-			object[glass].subAnimate = 0;
-			object[glass].animate = 0;
-			object[glass].moving = true;
+			placeObjectInMap(32, 40, 0, 32 + 8, 4, 3, 6, true, 10, 6, 22);		//Spawn broken glass as object #22
+			object[22].subAnimate = 0;
+			object[22].animate = 0;
+			object[22].moving = true;
 		}
 	}
 
 	//thingLogic();
-	setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+	//setWindow((xWindowCoarse << 3) | xWindowFine, yPos);			//Set scroll window
+	setWindow((xWindowCoarse << 3) | xWindowFine + xShake, yPos + yShake);			//Set scroll window
+	
+	
 	moveJump = false;
 
 	// drawSpriteDecimal(xWindowCoarse, 10, 0, 0);
@@ -2114,15 +2175,17 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 				dir =  true;
 			}
 			
-			int robot = placeObjectInMap(x, 64, 0, 48 + 0, 2, 6, 4 + random(0, 4), dir, 0, 0);
+			spawnHallwayRobot(x, dir);
+			
+			//int robot = placeObjectInMap(x, 64, 0, 48 + 0, 2, 6, random(4, 8), dir, 0, 0);
 			
 			//ADD RANDOM ROBOTS BJH
 
-			object[robot].speedPixels = robotSpeed;
+			// object[robot].speedPixels = robotSpeed;
 			
-			object[robot].xSentryLeft = 8;
-			object[robot].xSentryRight = 1080;	
-			object[robot].moving = true;		//Move robot
+			// object[robot].xSentryLeft = 8;
+			// object[robot].xSentryRight = 1080;	
+			// object[robot].moving = true;		//Move robot
 			
 		}
 	}
@@ -2130,7 +2193,106 @@ void hallwayLogic() { //--------------------This is called at 30Hz. Your main ga
 	if (budState != entering) {		//Default draw Bud first so he appears over things like chandeliers
 		objectLogic();		
 	}
+	else {
+		if (waitPriorityChange == true) {		//Bud's state just changed, and we need one more frame before flipping priority?
+			waitPriorityChange = false;			//Clear flag and...
+			objectLogic();						//DEW IT			
+		}
+	}
 
+}
+
+void spawnHallwayRobot(int spawnXpos, bool direction) {
+
+	selectRobot = random(0, 4);		//Get random robot #
+
+	int x;
+
+	for (x = 0 ; x < maxThings ; x++) {			//Find first open slot
+		if (object[x].active == false) {
+			objectIndexNext = x;
+			break;
+		}				
+	}
+	
+	if (x == maxThings) {			//Didn't find a slot? Abort
+		makeMessage("OBJECT LIMIT");
+		messageTimer = 40;			
+		return;
+	}
+
+	object[objectIndexNext].active = true;
+	
+	object[objectIndexNext].sheetX = robotSheetIndex[selectRobot][0];
+	object[objectIndexNext].sheetY = robotSheetIndex[selectRobot][1] + 48;
+	object[objectIndexNext].width = robotTypeSize[selectRobot][0];
+	object[objectIndexNext].height = robotTypeSize[selectRobot][1];
+	
+	object[objectIndexNext].palette = random(4, 8);
+	object[objectIndexNext].dir = direction;
+	
+	object[objectIndexNext].xSentryLeft = 8;
+	object[objectIndexNext].xSentryRight = (hallwayWidth << 3) - 8; //1080; //sentryRight;
+
+	object[objectIndexNext].xPos = spawnXpos;
+	object[objectIndexNext].yPos = 112 - (object[objectIndexNext].height << 3);
+	
+	if (selectRobot == 2) {					//Flat robots don't fix an 8 pixel edge, drop by 4
+		object[objectIndexNext].yPos += 4;
+	}
+	
+	object[objectIndexNext].category = 0;					//0 = gameplay elements >0 BG stuff
+
+	object[objectIndexNext].type = selectRobot;
+	object[objectIndexNext].animate = 0;
+	object[objectIndexNext].subAnimate = 0;
+	
+
+	object[objectIndexNext].speedPixels = robotSpeed;
+	
+	object[objectIndexNext].moving = true;		//Move robot
+
+
+	highestObjectIndex++;
+
+	// object[objectIndexNext].active = true;
+	// object[objectIndexNext].state = 0;				//Default state
+	
+	// object[objectIndexNext].xPos = xPos;
+	// object[objectIndexNext].yPos = yPos;
+	// object[objectIndexNext].sheetX = sheetX;
+	// object[objectIndexNext].sheetY = sheetY;
+	// object[objectIndexNext].width = width;
+	// object[objectIndexNext].height = height;
+	// object[objectIndexNext].palette = palette;
+	// object[objectIndexNext].dir = dir;
+
+	// object[objectIndexNext].category = category;			//0 = gameplay elements >0 BG stuff
+	// object[objectIndexNext].type = type;
+
+
+
+
+
+
+
+
+	// objectSheetIndex[objectDropCategory][0] = robotSheetIndex[selectRobot][0];			//Get sheet XY and offset by page 3
+	
+	// if (selectRobot == 5) {			//Greenie?
+		// objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 16;	
+		// objectPlacePalette = 5;		//Always green
+	// }
+	// else {
+		// objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 48;	
+	// }
+				
+	// objectTypeSize[objectDropCategory][0] = robotTypeSize[selectRobot][0];
+	// objectTypeSize[objectDropCategory][1] = robotTypeSize[selectRobot][1];	
+	
+	objectIndexLast = objectIndexNext;			//Store the index so when we complete the sentry entry we know where to store it
+
+	
 }
 
 
@@ -2152,7 +2314,7 @@ void objectLogic() {
 					object[g].animate++;				//Keep approaching TERMINAL VELOCITY
 				}
 
-				if (objectToTile(g) == true && object[g].animate > 4) {				//Scan base of object and see if it hit something solid (as wide as itself)
+				if (objectToTile(g) == true && object[g].animate > 6) {				//Scan base of object and see if it hit something solid (as wide as itself)
 				//if (object[g].yPos > (119 - (object[g].height << 3))) {		//Object hit the floor?
 					object[g].state = 100;					//Flag for main logic
 					object[g].yPos &= 0xF8;					//Lob off remainder (tile-aligned)
@@ -2391,142 +2553,155 @@ void setupElevator() {
 
 	fillTiles(0, 0, 14, 14, ' ', 0);			//Clear area
 
-	kittenFloor = 30;							//Testing
-	robotKillFloor = 20;
-	propDamageFloor = 10;
-
+	//kittenFloor = 40;				//testing
+	//robotKillFloor = 30;	
+	//propDamageFloor = 50;
+	//seconds = 48;
+	//minutes = 1;
+	
 	kittenTotal += kittenFloor;					//Inc globals
 	robotKillTotal += robotKillFloor;
 	propDamageTotal += propDamageFloor;
 
+	bonusPause = false;
 	bonusPhase = 1;
 	bonusTimer = 0;
-	menuTimer = 0;
+	menuTimer = 1;
 
-	seconds = 48;
-	minutes = 1;
+
 
 	//drawText("0123456789ABCDE", 0, 0, false);
-	drawText(" FLOOR X CLEAR", 0, 0, false);
-	drawDecimal(currentFloor, 7, 0);
+	//drawText(" FLOOR X CLEAR", 0, 0, false);
+	//drawDecimal(currentFloor, 7, 0);
 
 	kittenMessageTimer = 0;			//Bug only in testing but fix it anyway
+
+	kittyBonus = 0;
+	robotBonus = 0;
+	propBonus = 0;
 
 	isDrawn = true;	
 	displayPause(false);
 
+	floorSeconds = (minutes * 60) + seconds;		//How much time we spent
+	
+	int bestTimePerLevel = (bestTime[currentFloor - 1][0] * 60) + bestTime[currentFloor - 1][1];	//Convert minutes-seconds to seconds
+	
+	timeBonus = calculate_score(floorSeconds, bestTimePerLevel, 10000);		//Award a % of max 10k based on speed
 	
 }
 
 void elevatorLogic() {
 
-	fillTiles(0, 5, 14, 14, ' ', 0);			//Clear area
+	//fillTiles(0, 5, 14, 14, ' ', 0);			//Clear area
+
+	if (bonusPause == true) {
+		
+		if (--menuTimer == 0) {
+			bonusPhase++;
+			bonusPause = false;			//Next frame jumps to next state
+		}
+		return;
+	}
 
 	switch(bonusPhase) {
 	
 		case 1:
-			drawText(" KITTENS SAVED", 0, 5, false);
-			drawDecimal(kittenFloor, 6);
+			drawText(" KITTENS SAVED", 0, 0, false);
+			drawDecimal(kittyBonus, 1);
 
 			if (++bonusTimer > 1) {
 				music.PlayTrack(15);
 				bonusTimer = 0;
-				if (kittenFloor < 1) {
+				if (kittyBonus == kittenFloor) {
 					playAudio("audio/cash.wav", 100);
-					menuTimer = 40;
-					bonusPhase = 2;
+					menuTimer = 30;
+					bonusPause = true;						
 				}
 				else {
-					kittenFloor--;
+					kittyBonus++;
 					levelBonus += 100;				
 				}
-			}
+			}				
+
 		break;	
 	
 		case 2:
-			drawText("ROBOTS  SMASHED", 0, 5, false);
-			drawDecimal(robotKillFloor, 6);
+			if (robotKillFloor == 0) {
+						//0123456789ABCDE
+				drawText("ROBOT PACIFIST", 0, 3, false);
+				drawDecimal(10000 * currentFloor, 4);
+				levelBonus += (10000 * currentFloor);
+				playAudio("audio/cash.wav", 100);
+				menuTimer = 30;
+				bonusPause = true;			
+			}
+			else {
+				drawText("ROBOTS  SMASHED", 0, 3, false);
+				drawDecimal(robotBonus, 4);
 
-			if (++bonusTimer > 1) {
-				music.PlayTrack(15);
-				bonusTimer = 0;
-				if (robotKillFloor < 1) {
-					playAudio("audio/cash.wav", 100);
-					menuTimer = 40;
-					bonusPhase = 3;
-				}
-				else {
-					robotKillFloor--;
-					levelBonus += 50;					
-				}
+				if (++bonusTimer > 1) {
+					music.PlayTrack(15);
+					bonusTimer = 0;
+					if (robotBonus == robotKillFloor) {
+						playAudio("audio/cash.wav", 100);
+						menuTimer = 30;
+						bonusPause = true;	
+					}
+					else {
+						robotBonus++;
+						levelBonus += 50;					
+					}
+				}		
 			}
 		break;
 
 		case 3:
-			drawText("PROPERTY DAMAGE", 0, 5, false);
-			drawDecimal(propDamageFloor, 6);
-			
-			if (++bonusTimer > 1) {
-				music.PlayTrack(15);
-				bonusTimer = 0;
-				if (propDamageFloor < 1) {
-					playAudio("audio/cash.wav", 100);
-					menuTimer = 40;
-					bonusPhase = 4;
+			if (propDamageFloor == 0) {
+						//0123456789ABCDE
+				drawText("PROPERTY MASTER", 0, 6, false);
+				drawDecimal(20000 * currentFloor, 7);
+				levelBonus += (20000 * currentFloor);
+				playAudio("audio/cash.wav", 100);
+				menuTimer = 30;
+				bonusPause = true;				
+			}
+			else {
+				drawText("PROPERTY DAMAGE", 0, 6, false);
+				drawDecimal(propBonus, 7);
+				
+				if (++bonusTimer > 1) {
+					music.PlayTrack(15);
+					bonusTimer = 0;
+					if (propBonus == propDamageFloor) {
+						playAudio("audio/cash.wav", 100);
+						menuTimer = 30;
+						bonusPause = true;	
+					}	
+					else {
+						propBonus++;			
+						levelBonus += 10;					
+					}
 				}	
-				else {
-					propDamageFloor--;			
-					levelBonus += 10;					
-				}
 			}		
 		break;
 		
 		case 4:
-			drawText("  TIME BONUS   ", 0, 5, false);
-			drawText("00:00 ", 5, 6, false);
-			
-			if (minutes > 9) {
-				drawDecimal(minutes, 5, 6);
-			}
-			else {
-				drawDecimal(minutes, 6, 6);
-			}
-
-			if (seconds > 9) {
-				drawDecimal(seconds, 8, 6);
-			}
-			else {
-				drawDecimal(seconds, 9, 6);
-			}
-			
-			music.PlayTrack(15);
-
-			seconds--;
-			levelBonus += 5;
-			if (seconds < 0) {
-				seconds = 59;
-				if (--minutes < 0) {
-					playAudio("audio/cash.wav", 100);
-					bonusPhase = 5;					
-					menuTimer = 50;
-				}
-			}
+			drawText("  TIME BONUS   ", 0, 9, false);
+			drawDecimal(timeBonus, 10);
+			playAudio("audio/cash.wav", 100);				
+			menuTimer = 60;
+			bonusPause = true;	
 		break;
 		
-		case 5:		
-			if (--menuTimer < 1) {
-				score += levelBonus;		//Actually add the bonus to the score, then next level
-				nextFloor();
-			}		
+		case 5:					
+			score += levelBonus;		//Actually add the bonus to the score, then next level
+			nextFloor();					
 		break;		
 		
 		
 	}
-	
-	drawText("               ", 0, 7, false);
-	drawText("  LEVEL BONUS", 0, 8, false);
-	drawDecimal(levelBonus, 9);	
-	
+		
 	drawText("  TOTAL SCORE", 0, 13, false);
 	drawDecimal(score + levelBonus, 14);		//Draw score + bonus but don't actually add it til the end
 	
@@ -2853,15 +3028,215 @@ void drawStoryScreen(int which) {
 }	
 
 
+void setupEnding() {
+
+	stopAudio();
+	
+	clearObjects();
+
+	loadPalette("story/ending_t.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
+	loadPattern("story/ending_t.nes", 0, 256);			//Table 0 = condo tiles
+	loadPattern("sprites/bud.nes", 256, 256);	//Table 1 = Bud Face sprites
+
+	fillTiles(0, 0, 31, 31, ' ', 0);			//Black BG
+			
+	budX = 136;			//Use for 
+	budY = 0;			//Use this for message #
+	menuTimer = 1;	
+	
+	budFrame = 0;
+	
+	worldX = 136;			//BG
+	worldY = 136;			//Used for grass
+	setWindow(0, 0);		//Text will appear on left side
+
+	for (int g = 0 ; g < 32 ; g++) {		
+		drawTile(g, 8, 0xE0, 3, 0);		//Draw strip
+	}
+
+	for (int g = 0 ; g < 32 ; g += 8) {		
+		for (int hg = 0 ; hg < 8 ; hg++) {
+			for (int h = 0 ; h < 7 ; h++) {
+				drawTile(g + hg, h, 0x60 + hg + (h * 16), 2, 0);		//Draw BG buildings
+			}
+		}	
+	}
+	
+	
+	for (int hg = 0 ; hg < 5 ; hg++) {			//Draw titular condo
+		for (int h = 0 ; h < 9 ; h++) {
+			drawTile(24 + hg, h, 0x69 + hg + (h * 16), 3, 0);	
+		}
+	}	
+
+	
+	for (int g = 0 ; g < 31 ; g += 4) {		
+		drawTile(g, 9, 0xF0, 1, 0);		//Draw grass
+		drawTile(g + 1, 9, 0xF1, 1, 0);		//Draw grass
+		drawTile(g + 2, 9, 0xF2, 1, 0);		//Draw grass
+		drawTile(g + 3, 9, 0xF3, 1, 0);		//Draw grass
+	}
+
+
+	setButtonDebounce(left_but, false, 0);
+	setButtonDebounce(right_but, false, 0);
+
+	displayPause(false);   		//Allow core 2 to draw
+	isDrawn = true;	
+
+	music.PlayTrack(13, true);
+	
+}
+
+void endingLogic() {
+
+	static int scroller = 0;
+	//static int worldX = 136;
+	//static int worldY = 136;
+
+	static int kittenAnimate = 0;
+
+	bool animateBud = false;			//Bud is animated "on twos" (every other frame at 30HZ, thus Bud animates at 15Hz)
+	
+	if (++budSubFrame > 1) {
+		budSubFrame = 0;
+		if (++budFrame > 7) {
+			budFrame = 0;
+		}
+		if (++kittenAnimate > 3) {
+			kittenAnimate = 0;
+		}
+	}	
+		
+	for (int g = 0 ; g < 9 ; g++) {		//Scroll slices, leave bottom text static
+		
+		setWindowSlice(g, worldX);	
+	}
+	
+	setWindowSlice(9, worldY);
+
+	if (--worldY < 0) {
+		worldY = 32;
+	}
+	
+	if (++scroller > 2) {		//BG scrolls much slower
+		scroller = 0;
+		if (--worldX < 0) {
+			worldX = 64;
+		}
+	}
+
+	drawSprite(12, 59, 3, 16 + (budFrame << 1), 3, 2, 4, true, false);	//Bud walking
+
+	drawSprite(40, 59, 12, 16 + (kittenAnimate << 1), 2, 2, 5, true, false);	//Kittens
+	
+	drawSprite(57, 59, 12, 16 + (kittenAnimate << 1), 2, 2, 7, true, false);	//Kittens
+	
+	drawSprite(77, 59, 12, 16 + (kittenAnimate << 1), 2, 2, 5, true, false);	//Kittens
+	
+	drawSprite(100, 59, 12, 16 + (kittenAnimate << 1), 2, 2, 4, true, false);	//Kittens	
+
+	if (--menuTimer == 0) {
+
+		fillTiles(0, 10, 14, 14, ' ', 3);			//Black BG white text
+
+		switch(budY) {
+
+			case 0:
+				menuTimer = 30;
+			break;
+		
+			case 1:	    //0123456789ABCDE	
+				drawText("CONGRATULATIONS", 0, 11, false);
+				drawText(" YOU DEFEATED", 0, 12, false);
+				drawText("THE EVIL ROBOTS", 0, 13, false);	
+				menuTimer = 150;
+			break;
+			
+			case 2:	    //0123456789ABCDE	
+				drawText(" BUD FOUND NEW", 0, 11, false);
+				drawText("SAFE HOMES FOR", 0, 12, false);
+				drawText(" THE KITTENS ", 0, 13, false);
+				menuTimer = 150;
+			break;
+		
+			case 3:	    //0123456789ABCDE	
+				drawText(" HE WANTED TO", 0, 11, false);
+				drawText(" KEEP ONE AS A", 0, 12, false);
+				drawText("NEW BROTHER BUT", 0, 13, false);
+				drawText("  BEN SAID NO", 0, 14, false);
+				menuTimer = 150;
+			break;
+	
+			case 4:	    //0123456789ABCDE	
+				drawText("ROBOTS SMASHED:", 0, 11, false);
+				drawDecimal(robotKillTotal, 12);
+				menuTimer = 80;
+			break;
+			
+			case 5:	    //0123456789ABCDE	
+				drawText(" STUFF BROKEN:", 0, 11, false);
+				drawDecimal(propDamageTotal, 12);
+				menuTimer = 80;
+			break;
+			case 6:	    //0123456789ABCDE	
+				drawText("KITTENS SAVED:", 0, 11, false);
+				drawDecimal(kittenTotal, 12);
+				menuTimer = 80;
+			break;	
+			case 7:	    //0123456789ABCDE	
+				drawText("  TOTAL SCORE", 0, 11, false);
+				drawDecimal(score, 12);
+				menuTimer = 80;
+			break;	
+			case 8:	    //0123456789ABCDE	
+				drawText("  THANKS FOR", 0, 11, false);
+				drawText("  JOING OUR", 0, 12, false);
+				drawText(" 2023 WORKSHOP!", 0, 13, false);			
+				menuTimer = 80;
+			break;	
+			
+			case 9:	    //0123456789ABCDE	
+				drawText("  PRESS A TO", 0, 11, false);
+				drawText("   CONTINUE", 0, 12, false);		
+				menuTimer = 80;
+			break;				
+	
+		}
+
+		if (++budY > 9) {
+			budY = 0;
+		}
+	}
+
+		
+	if (button(A_but)) {
+		music.StopTrack(13);		
+		switchGameTo(gameOver);				
+	}
+
+}
+
+
+int calculate_score(int time_taken, int best_time, int maximum_score) {
+    float percent_of_best_time = (float)best_time / time_taken;
+    int scoreAI = (int)(percent_of_best_time * maximum_score);
+    return scoreAI;
+}
+
+
+
 void nextFloor() {
 
-	if (++currentFloor == 7) {
-		//goto boss
+	if (++currentFloor > 6) {
+		switchGameTo(theEnd);
+		return;					//a winner is YOU
 	}
 	
 	for (int x = 0 ; x < 6 ; x++) {		//Clear next set of condos
 		apartmentState[x] = 0;
 	}
+	levelComplete = false;
 	
 	currentCondo = 0;			//Bud hasn't entered a condo
 
@@ -2879,6 +3254,7 @@ void nextFloor() {
 	levelScore = score;				//Save last score at level (when saving, this is what you revert to)
 
 	stopWatchClear();
+	
 	switchGameTo(goHallway);
 	
 }
@@ -2901,6 +3277,8 @@ void drawBudStats() {
 }	
 
 void budDamage() {
+
+	//return;		//UNVINCIBLE BUD!!!!!!!!!!!!!!!!!
 
 	if (budState == entering || budState == exiting) {
 		return;
@@ -2996,7 +3374,7 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 					
 			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
 		
-			if (object[g].animate > 5) {			//Object must be falling at at least half speed to kill a robot
+			if (object[g].animate > 7) {			//Object must be falling at at least half speed to kill a robot
 			
 				bool hit = false;
 				
@@ -3510,13 +3888,16 @@ void budLogic2() {
 		if (button(A_but) && mewTimer == 0) {
 			playAudio("audio/bud_mew.wav", 90);
 			mewTimer = 20;
-			levelComplete = true;
-			elevatorOpen = true;
-			drawHallwayElevator(64);
-			redrawMapTiles();
-			kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
+			
+			// levelComplete = true;
+			// elevatorOpen = true;
+			// drawHallwayElevator(64);
+			// redrawMapTiles();
+			// kittenMessageTimer = 60;		//In hallway logic, use this var to print GOTO THE ELEVATOR
 		
-			//kittenCount = kittenTotal;
+			//kittenCount = kittenToRescue;	//Hackzor cheats
+			
+			//worldX = -2;
 		}	
 			
 	}
@@ -3538,10 +3919,9 @@ void budLogic2() {
 					apartmentState[temp] |= 0x40;								//Set the door open bit
 					playAudio("audio/doorOpen.wav", 100);
 					drawHallwayDoorOpen(doorTilePos[temp], 0);
-					//populateDoor(doorTilePos[temp], temp + 1, true);		//Stuffs the high byte with BCD floor/door number
 					redrawMapTiles();
-					//redrawCurrentHallway();
 					budState = entering;
+					waitPriorityChange = true;		//Tells the hallwaylogic wrapper to draw sprite priority normal until next frame
 					budFrame = 0;	
 					currentCondo = temp + 1;
 				}
@@ -3557,13 +3937,14 @@ void budLogic2() {
 			
 		}
 
-		if (checkElevator() == 1 && budState != entering && budState != exiting) {								//Bud standing in front of elevator?
+		if (checkElevator() == 1 && budState != entering && budState != exiting) {				//Bud standing in front of elevator?
 			
 			if (elevatorOpen == true) {							//Ready for the next level?
 
 				if (button(up_but)) {
 					playAudio("audio/elevDing.wav", 100);
 					budState = entering;
+					waitPriorityChange = true;		//Tells the hallwaylogic wrapper to draw sprite priority normal until next frame
 					budFrame = 0;				
 				}
 				
@@ -3684,7 +4065,12 @@ bool condoMoveLeft(int theSpeed) {
 	
 		if (xLevelCoarse == 0) {		//At left edge?
 			xWindowFine = 0;			//Clear out fine register, we can't go further left
-			worldX += theSpeed;
+			worldX = 0;
+			//budWorldX = 0;
+			
+			//Serial.println("Left edge");
+			
+			//worldX += theSpeed;
 			budWorldX += theSpeed;
 			return false;				//Bud can now move past his scroll edge
 		}
@@ -3742,7 +4128,7 @@ bool condoMoveRight(int theSpeed) {
 		if (xLevelCoarse == (mapWidth - 16)) {		//At right edge?
 			xWindowFine = 7;			//Max out fine register, we can't go further right
 			worldX -= theSpeed;
-			budWorldX -= theSpeed;
+			budWorldX -= theSpeed;			
 			return false;				//Bud can now move past his scroll edge
 		}
 	
@@ -3850,7 +4236,7 @@ void stopWatchTick() {
 		frames = 0;
 		if (++seconds == 60) {
 			seconds = 0;
-			++minutes;
+			++minutes;				//I guess this is how you 'sploit in Angry Birds code injection?
 		}			
 	}
 
@@ -4137,6 +4523,7 @@ void setupEdit() {
 	
 	setButtonDebounce(B_but, false, 0);
 	setButtonDebounce(A_but, false, 0);	
+	setButtonDebounce(C_but, true, 1);
 	
 	setCoarseYRollover(0, 14);   //Sets the vertical range of the tilemap, rolls back to 0 after 29
 
@@ -4186,6 +4573,8 @@ void setupEdit() {
 	redrawEditWindow();	
 	
 	editAaction = 0;				//0 = drop tiles 1 = copy, 2 = paste, 3 = drop sprite
+	
+	tileDropAttribute = 3;	//Start with this one so it's more intuitiuve
 	
 	editDisableCursor = false;
 	displayPause(false);   		//Allow core 2 to draw
@@ -4322,7 +4711,7 @@ void drawEditMenuPopUp() {
 	drawText("PASTE + SLOT", 1, 1, false);	
 	drawDecimal(currentCopyBuffer, 14, 1);	
 			//0123456789ABCDE
-	drawText("--FILE SYSTEM--", 1, 2, false);
+	drawText("---------------", 1, 2, false);
 	drawText("CHANGE FLOOR", 1, 3, false);
 	tileDirect(14, 3, fileNameFloor);
 	drawText("CHANGE ROOM", 1, 4, false);
@@ -4483,7 +4872,7 @@ void updateMapFileNameEdit() {				//Call thise in edit/game mode before calling 
 		condoMap[8][3] = 0x80 + (fileNameCondo - 48);		
 	}
 	else {
-		Serial.print("HALLWAY MODE: ");
+		//Serial.print("HALLWAY MODE: ");
 		currentFloor = fileNameFloor - 48;				//Convert ASCII to a number and change the Floor # on top of the elevator
 		
 		if (cutscene == false) {
@@ -4768,8 +5157,7 @@ void editLogic() {
 			setButtonDebounce(up_but, false, 0);			//Tile sliding debounce
 			setButtonDebounce(down_but, false, 0);
 			setButtonDebounce(left_but, false, 0);
-			setButtonDebounce(right_but, false, 0);
-			setButtonDebounce(A_but, false, 0);
+			setButtonDebounce(right_but, false, 0);			
 			bButtonFlag = false;
 			clearMessage();
 			
@@ -4779,6 +5167,9 @@ void editLogic() {
 				setButtonDebounce(A_but, true, 0);
 				makeMessage("PLACE OBJECT");
 				messageTimer = 20;						
+			}
+			else {
+				setButtonDebounce(A_but, false, 0);
 			}
 		}		
 			
@@ -4905,18 +5296,37 @@ void editLogic() {
 					makeMessage("TILE PLACE");
 					messageTimer = 20;
 					redrawEditWindow();	
+					setButtonDebounce(A_but, false, 0);
 				break;
 				
 				case 1:
+					editAaction = 6;
 					makeMessage("TILE TYPE");
 					messageTimer = 20;
-					redrawEditWindow();					
+					redrawEditWindow();	
+					switch(tileDropAttribute) {		
+						case 2:
+							tileDropAttributeMask = 0x00;			//free
+						break;
+						
+						case 3:
+							tileDropAttributeMask = 0x80;			//platform
+						break;
+						
+						case 4:
+							tileDropAttributeMask = 0x40;			//blocked
+						break;
+					}										
+					setButtonDebounce(A_but, false, 0);	
 				break;
 				
 				case 2:
+					editAaction = 10;
 					makeMessage("OBJECT PLACE");
 					messageTimer = 20;
-					redrawEditWindow();					
+					redrawEditWindow();	
+					drawObjectLoadBrush(false);
+					setButtonDebounce(A_but, true, 1);					
 				break;				
 			}
 		}			
@@ -4994,6 +5404,7 @@ void editLogic() {
 				switch(objectDropCategory) {					
 					case 0:		//Game stuff
 						placeObjectInMap();					//TEMP BJH - it mostly works?
+						
 						if (selectRobot < 4) {			  //Evil robot? Prompt to set sentry edges
 							editAaction = 11;
 							makeMessage("SENTRY LEFT?");
@@ -5018,7 +5429,13 @@ void editLogic() {
 			
 			
 			case 11:					//Set sentry left edge
-				sentryLeft = (editWindowX << 3) + (drawX << 3);
+				sentryLeft = (editWindowX << 3) + (drawX << 3);			//Get world pixel
+				if (sentryLeft >= object[objectIndexLast].xPos) {		//Sentry left has to be at least 1 tile to the left of where you dropped robot		
+					makeMessage("INVALID LEFT");
+					messageTimer = 20;	
+					redrawEditWindow();					
+					break;
+				}								
 				makeMessage("SENTRY RIGHT?");
 				messageTimer = 20;	
 				redrawEditWindow();		
@@ -5027,6 +5444,12 @@ void editLogic() {
 			
 			case 12:					//Set sentry right edge
 				sentryRight = (editWindowX << 3) + (drawX << 3) + 8;	//The right edge of the recticle is the edge (+8)
+				if (sentryRight < object[objectIndexLast].xPos + ((object[objectIndexLast].width + 1) << 3)) {			//Sentry area must be AT LEAST width of robot + 1 tile		
+					makeMessage("INVALID RIGHT");
+					messageTimer = 20;	
+					redrawEditWindow();					
+					break;
+				}				
 				makeMessage("STORED");
 				messageTimer = 20;	
 				redrawEditWindow();	
@@ -5137,18 +5560,23 @@ void editLogic() {
 	
 }
 
-void placeObjectInMap() {
+void placeObjectInMap() {					//Used in edit mode
 
-	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
+	int x;
+
+	for (x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == false) {
 			objectIndexNext = x;
 			break;
 		}				
 	}
 	
-	//Serial.print("Placing object #");
-	//Serial.println(objectIndexNext);
-	
+	if (x == maxThings) {			//Didn't find a slot? Abort
+		makeMessage("OBJECT LIMIT");
+		messageTimer = 40;			
+		return;
+	}
+
 	object[objectIndexNext].active = true;
 	object[objectIndexNext].xPos = (editWindowX << 3) + drawXfine;
 	object[objectIndexNext].yPos = drawYfine;
@@ -5182,7 +5610,7 @@ void placeObjectInMap() {
 
 }
 
-int placeObjectInMap(int xPos, int yPos, int sheetX, int sheetY, int width, int height, int palette, int dir, int category, int type) {
+int placeObjectInMap(int xPos, int yPos, int sheetX, int sheetY, int width, int height, int palette, int dir, int category, int type) {	//Used in game (mostly hallway)
 
 	for (int x = 0 ; x < maxThings ; x++) {			//Find first open slot
 		if (object[x].active == false) {
@@ -5217,6 +5645,25 @@ int placeObjectInMap(int xPos, int yPos, int sheetX, int sheetY, int width, int 
 
 }
 
+void placeObjectInMap(int xPos, int yPos, int sheetX, int sheetY, int width, int height, int palette, int dir, int category, int type, int objectNumber) {	//Used to spawn an item at a forced object # (used for windows in hallway to ensure they appear BEHIND robots)
+	
+	object[objectNumber].active = true;
+	object[objectNumber].state = 0;				//Default state
+	
+	object[objectNumber].xPos = xPos;
+	object[objectNumber].yPos = yPos;
+	object[objectNumber].sheetX = sheetX;
+	object[objectNumber].sheetY = sheetY;
+	object[objectNumber].width = width;
+	object[objectNumber].height = height;
+	object[objectNumber].palette = palette;
+	object[objectNumber].dir = dir;
+
+	object[objectNumber].category = category;			//0 = gameplay elements >0 BG stuff
+	object[objectNumber].type = type;
+	
+}
+
 
 void testAnimateObjects(bool onOff) {
 
@@ -5239,7 +5686,7 @@ void clearObjects() {
 		object[x].animate = 0;
 	}	
 	
-	highestObjectIndex = 0;
+	highestObjectIndex = 0;						//Highest index to scan across
 	
 }
 
@@ -5416,7 +5863,12 @@ void windowObjectSelect() {
 				if (--selectRobot < 0) {
 					selectRobot = 5;
 				}			
-			break;			   
+			break;		
+			case 6:
+				testAnimateState = false;
+				testAnimateObjects(testAnimateState);			
+			break;
+			
 			default:	
 				if (--objectDropType < objectTypeRange[objectDropCategory][0]) {
 					objectDropType = objectTypeRange[objectDropCategory][1];			//Roll over
@@ -5434,7 +5886,7 @@ void windowObjectSelect() {
 			break;	
 
 			case 6:
-				testAnimateState = !testAnimateState;
+				testAnimateState = true;
 				testAnimateObjects(testAnimateState);			
 			break;
 			
@@ -5481,7 +5933,7 @@ void drawObjectSelectWindow() {
 	fillTiles(0, 0, 14, 8, ' ', 0);							//Clear area
 	
        //0123456789ABCDE
-	drawText(")  TYPE  *", 5, 1, false);
+	drawText(" ) TYPE *", 5, 1, false);
 	
 // int objectDropCategory = 1;				//0= gameplay (enemies and greenies), 1 = bad art 4x2, 2 = small 2x2, 3= tall 2x3, 4= appliance 3x2, 5= eraser
 // int objectDropType= 0;					//index of object within its category
@@ -5490,14 +5942,25 @@ void drawObjectSelectWindow() {
 //int robotSheetIndex[5][2] = { {0, 0}, {0, 8}, {0, 12}, {8, 0}, {6, 3} };
 //int robotTypeSize[5][2] = { {2, 6}, {3, 3}, { 4, 2 }, { 4, 3 }, { 2, 2 } };		//Size index
 
+	drawObjectLoadBrush(true);		//Draw text and show item
 
+	drawText("<  ITEM  >", 5, 4, false);
+	
+	drawText("A=FLIP H", 5, 6, false);		//Starting dir of robots, no effect on greenes
+	drawText("C=COLOR", 5, 7, false);		//No effect on greenies because, duh, they're GREEN ONLY
+		    //0123456789ABCDE	
+	drawText("SEL=FINE/COARSE", 0, 8, false);
+	
+}
+
+void drawObjectLoadBrush(bool inMenu) {
+	
 	switch(objectDropCategory) {
 		       //0123456789ABCDE
 		case 0:
-			drawText("GAME PLAY", 5, 2, false);
 			objectSheetIndex[objectDropCategory][0] = robotSheetIndex[selectRobot][0];			//Get sheet XY and offset by page 3
 			
-			if (selectRobot == 5) {
+			if (selectRobot == 5) {			//Greenie?
 				objectSheetIndex[objectDropCategory][1] = robotSheetIndex[selectRobot][1] + 16;	
 				objectPlacePalette = 5;		//Always green
 			}
@@ -5507,53 +5970,66 @@ void drawObjectSelectWindow() {
 						
 			objectTypeSize[objectDropCategory][0] = robotTypeSize[selectRobot][0];
 			objectTypeSize[objectDropCategory][1] = robotTypeSize[selectRobot][1];
-			
-			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+			if (inMenu) {
+				drawText("GAME PLAY", 5, 2, false);	
+				drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+			}			
 		break;			   
-		case 1:
-			drawText("BAD ART", 5, 2, false);		//type 0-7			
+		case 1:						
 			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x01) << 2);
-			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 1) << 1) + 32;	
-			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 1) << 1) + 32;
+			if (inMenu) {
+				drawText("BAD ART", 5, 2, false);		//type 0-7	
+				drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);				
+			}
+			
 		break;
 		case 2:
-			drawText("KITCHEN", 5, 2, false);		//type 0-15
 			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x03) << 1) + 8;
-			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 2) << 1) + 32;	
-			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
-			
+			objectSheetIndex[objectDropCategory][1] = ((objectDropType >> 2) << 1) + 32;
+			if (inMenu) {
+				drawText("KITCHEN", 5, 2, false);		//type 0-15
+				drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);	
+			}						
 		break;		
-		case 3:
-			drawText("TALL STUFF", 5, 2, false);	//type 0-3
+		case 3:			
 			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x03) << 1) + 8;
 			objectSheetIndex[objectDropCategory][1] = 32 + 8;
-			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);				
+			if (inMenu) {
+				drawText("TALL STUFF", 5, 2, false);	//type 0-3	
+				drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);								
+			}			
 		break;		
-		case 4:
-			drawText("APPLIANCE", 5, 2, false);		//type 0-3
+		case 4:			
 			objectSheetIndex[objectDropCategory][0] = ((objectDropType & 0x01) << 2) + 8;
 			objectSheetIndex[objectDropCategory][1] = 32 + 11 + ((objectDropType >> 1) << 1);
-			drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);				
+			if (inMenu) {
+				drawText("APPLIANCE", 5, 2, false);		//type 0-3	
+				drawSprite(0, 0, objectSheetIndex[objectDropCategory][0], objectSheetIndex[objectDropCategory][1], objectTypeSize[objectDropCategory][0], objectTypeSize[objectDropCategory][1], objectPlacePalette, objectPlaceDir, false);								
+			}			
 		break;	
-		case 5:
-			drawText("ERASE", 5, 2, false);		//type 0-3
-			drawSprite(16, 16, 0x2C, 3, false, false);
+		case 5:		
+			if (inMenu) {
+				drawText("ERASE", 5, 2, false);		//type 0-3	
+				drawSprite(16, 16, 0x2C, 3, false, false);
+			}			
 		break;	
-
 		case 6:
-			drawText("TEST ANI", 5, 2, false);		//type 0-3			
+			if (inMenu) {
+				drawText("  TEST MOTION", 0, 2, false);		//type 0-3	
+				
+				drawText("L<OFF", 0, 1, false);		//type 0-3
+				drawText("R>ON", 0, 3, false);		//type 0-3				
+			}					
 		break;
 		
 	}
 	
-	drawText("<  ITEM  >", 5, 4, false);
 	
-	drawText("A=FLIP H", 5, 6, false);		//Starting dir of robots, no effect on greenes
-	drawText("C=COLOR", 5, 7, false);		//No effect on greenies because, duh, they're GREEN ONLY
-		    //0123456789ABCDE	
-	drawText("SEL=FINE/COARSE", 0, 8, false);		//No effect on greenies because, duh, they're GREEN ONLY
 	
 }
+
+
 
 void copyToBuffer() {
 

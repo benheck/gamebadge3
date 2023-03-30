@@ -58,7 +58,7 @@ bool gameObject::hitBoxSmall(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {
 	
 }	
 
-void gameObject::scan(uint16_t worldX, uint16_t worldY) {
+void gameObject::scan(int16_t worldX, int16_t worldY) {
 
 	visible = true;
 

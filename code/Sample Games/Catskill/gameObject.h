@@ -14,7 +14,7 @@ class gameObject
 	void defineTileSingle(int whichTile);						//Defines a single tile object like a Greenie
 	void setSize(int theWidth, int theHeight);
 
-	void scan(uint16_t worldX, uint16_t worldY);
+	void scan(int16_t worldX, int16_t worldY);
 	bool hitBox(int16_t x1, int16_t y1, int16_t x2, int16_t y2);
 	bool hitBoxSmall(int16_t x1, int16_t y1, int16_t x2, int16_t y2);
 
