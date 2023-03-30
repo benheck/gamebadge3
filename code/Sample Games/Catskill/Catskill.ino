@@ -3387,6 +3387,7 @@ void fallCheckRobot(int index) {		//Pass in robot object index we are checking f
 					
 			int g = fallingObjectIndex[x];			//Get falling object index # (to make this next part not super long)
 		
+			//Was > 7 but paintings just above robots didn't work
 			if (object[g].animate > 5) {			//Object must be falling at at least half speed to kill a robot
 			
 				bool hit = false;
