@@ -793,6 +793,8 @@ void drawSplashScreen() {
 
 void drawTitleScreen() {
 
+	stopAudio();
+
 	loadPalette("title/title_0.dat");                //Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("title/title_0.nes", 0, 256);		//Load file into beginning of pattern memory and 512 tiles long (2 screens worth)					
 
@@ -849,6 +851,8 @@ void drawTitleScreen() {
 }
 
 void drawPauseMenu() {
+
+	stopAudio();
 	
 	loadPattern("condo/condo.nes", 0, 256);			//Table 0 = condo tiles
 	
@@ -874,6 +878,8 @@ void drawPauseMenu() {
 //Gameplay-----------------------------------------------
 
 void setupLoad() {
+
+	stopAudio();
 	
 	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
@@ -982,6 +988,8 @@ void loadLogic() {
 }
 
 void setupSave() {
+
+	stopAudio();
 	
 	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
@@ -1208,6 +1216,8 @@ void loadGameFile(int slot) {
 
 void setupDiffSelect() {
 
+	stopAudio();
+
 	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles
 	loadPattern("title/bud_face.nes", 256, 256);	//Table 1 = Bud Face sprites
@@ -1326,6 +1336,8 @@ void diffSelectLogic() {
 }
 
 void startNewGame() {
+
+	stopAudio();
 	
 	powerMax = 5 - difficulty;
 	
@@ -1348,6 +1360,8 @@ void startNewGame() {
 }
 
 void setupGameOver() {
+
+	stopAudio();
 
 	loadPalette("ui/saveLoad.dat");            		//Load palette colors from a YY-CHR file. Can be individually changed later on
 	loadPattern("ui/saveLoad.nes", 0, 256);			//Table 0 = condo tiles		
@@ -2711,7 +2725,8 @@ void elevatorLogic() {
 
 void setupStory() {
 	
-	mapWidth = hallwayWidth;			//We used hallway mode to draw most of the story screens	
+	mapWidth = hallwayWidth;			//We used hallway mode to draw most of the story screens
+	
 	stopAudio();	
 	clearObjects();
 	fillTiles(0, 0, 31, 31, ' ', 3);			//Clear whole area
@@ -3217,13 +3232,11 @@ void endingLogic() {
 
 }
 
-
-int calculate_score(int time_taken, int best_time, int maximum_score) {
+int calculate_score(int time_taken, int best_time, int maximum_score) {			//THANKS CHAT-GPT! OUR EVIL SKYNET OVERLORD
     float percent_of_best_time = (float)best_time / time_taken;
     int scoreAI = (int)(percent_of_best_time * maximum_score);
     return scoreAI;
 }
-
 
 
 void nextFloor() {
@@ -4512,6 +4525,8 @@ void setupEdit() {
 
 	clearObjects();
 	
+	stopAudio();
+	
 	loadPattern("sprites/bud.nes", 256, 256);
 	loadPattern("sprites/objects.nes", 512, 256);	//Table 2 = condo objects
 	loadPattern("sprites/robots.nes", 768, 256);	//Table 3 = robots
@@ -4888,6 +4903,8 @@ void updateMapFileNameEdit() {				//Call thise in edit/game mode before calling 
 
 void saveLevel() {
 
+	stopAudio();
+
 	saveFile(mapFileName);
 	
 	//return;
@@ -5004,6 +5021,8 @@ void saveLevel() {
 }
 
 void loadLevel() {
+	
+	stopAudio();
 	
 	if (loadFile(mapFileName) == false) {	
 		makeMessage("FILE NOT FOUND");
