@@ -1,6 +1,5 @@
 This folder contains the files/folders that should be placed in the root directory of the Pi Pico's USB "EXT FLASH" when connected to a PC.
-
-These files are for "Catskillvania: Condo of Bud" by Ben Heckendorn
+These files are for the "Catskillvania" game
 
 NES - pattern tables (tiles and sprites)
 PAL - RGB palettes that define what colors you can select from
