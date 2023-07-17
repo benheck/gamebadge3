@@ -1311,14 +1311,12 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 
 		uint16_t *pointer = &linebuffer[whichBuffer][0];    		//Use pointer so less math later on
 		
-		if (whichBuffer == 0) {
-			gpio_put(15, 1);
-		}
-		else {
-			gpio_put(27, 1);
-		}
-		
-													//Scope testing row render time
+		// if (whichBuffer == 0) {										//Scope testing row render time
+			// gpio_put(15, 1);
+		// }
+		// else {
+			// gpio_put(27, 1);
+		// }
 
 		if (winYJumpList[row] & 0x80) {								//Flag to jump to a different row in the nametable? (like for a status bar)
 			coarseY = winYJumpList[row] & 0x1F;						//Jump to row indicated by bottom 5 bits								
@@ -1414,8 +1412,8 @@ void sendFrame() {								//This is executed by Core1. Core0 can do other stuff 
 			}
 		}
 
-		gpio_put(15, 0);
-		gpio_put(27, 0);
+		// gpio_put(15, 0);			//Scope testing row render time
+		// gpio_put(27, 0);
 		
 		dmaX(5, &linebuffer[whichBuffer][0], 3840);			//Send the 240x16 pixels we just built to the LCD    
 
