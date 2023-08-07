@@ -1,0 +1,18 @@
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.exe
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.deps.json
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.runtimeconfig.json
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.runtimeconfig.dev.json
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.dll
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\ref\Tiled To Gamebadge3.dll
+C:\Users\ben\source\repos\Tiled To Gamebadge3\bin\Debug\net5.0-windows\Tiled To Gamebadge3.pdb
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.csproj.AssemblyReference.cache
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled_To_Gamebadge3.Form1.resources
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.csproj.GenerateResource.cache
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.AssemblyInfoInputs.cache
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.AssemblyInfo.cs
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.csproj.CoreCompileInputs.cache
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.dll
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\ref\Tiled To Gamebadge3.dll
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.pdb
+C:\Users\ben\source\repos\Tiled To Gamebadge3\obj\Debug\net5.0-windows\Tiled To Gamebadge3.genruntimeconfig.cache
