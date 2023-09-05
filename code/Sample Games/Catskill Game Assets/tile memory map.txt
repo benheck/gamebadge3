@@ -1,0 +1,4 @@
+0-15 BG tiles
+16-31 Bud sprites
+32-47 Snashable objects
+48-63 Robots and kittens
