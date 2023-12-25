@@ -331,7 +331,7 @@ int timeBonus;					//Pre-calc bonus for time (thanks CHAT-GPT, our new overlord 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
-	gamebadge3init();						//Init system
+	gamebadge3init(3);						//Init system
 
 	menuTimer = 0;
 
