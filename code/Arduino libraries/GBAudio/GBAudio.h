@@ -17,8 +17,15 @@
 
 #define PULSE1              6                           // GPIO for the Pulse Wave Channel #1
 #define PULSE2              8                           // GPIO for the Pulse Wave Channel #2
+
+#ifdef GAMEBADGE3B                                      // 2024 version of GB3 uses GP0 & 1 for audio to make SPI1 available for an SD card
+#define TRINOISE            1                           // Use GPIO 1 for Triangle + Noise Channel
+#define PCM                 0                           // Use GPIO 0 for PCM Channel
+#else
 #define TRINOISE            10                          // GPIO for the Triangle + Noise Channel
 #define PCM                 12                          // GPIO for the DPCM Channel
+#endif
+
 #define SAMPLE_RATE         15625
 #define PHASE_1HZ           4.194304
 #define WAVE_TIMER          -64
