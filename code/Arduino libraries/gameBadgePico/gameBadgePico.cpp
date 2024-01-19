@@ -1,5 +1,4 @@
 //Game & graphics driver for gameBadgePico (MGC 2023)
-
 #include <hardware/pio.h>								//PIO hardware
 
 #include "Arduino.h"
@@ -101,7 +100,11 @@ const struct st7789_config lcd_config = {
     .gpio_bl  = 22
 };
 
-void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
+void gamebadge3binit() {
+	gamebadge3init(true);
+}
+
+void gamebadge3init(bool remapAudio) {				//Sets up gamebadge and a bunch of other crap
 
 	flash.begin();
 
@@ -146,8 +149,15 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 
     gpio_set_function(6, GPIO_FUNC_PWM);
 	gpio_set_function(8, GPIO_FUNC_PWM);
-    gpio_set_function(10, GPIO_FUNC_PWM);
-	gpio_set_function(12, GPIO_FUNC_PWM);
+
+	if (remapAudio) {
+		gpio_set_function(0, GPIO_FUNC_PWM);
+		gpio_set_function(1, GPIO_FUNC_PWM);
+	} else {
+    	gpio_set_function(10, GPIO_FUNC_PWM);
+		gpio_set_function(12, GPIO_FUNC_PWM);
+	}
+
 	gpio_set_function(14, GPIO_FUNC_PWM);
 	
 	pwm_set_gpio_level(14, 128);					//Set PWM base level
@@ -155,8 +165,14 @@ void gamebadge3init() {				//Sets up gamebadge and a bunch of other crap
 			//GPIO , our Channel #
 	setupPWMchannels(6, 0);					//Map GPIO to slices/channel to our own channel index (saves math later)
 	setupPWMchannels(8, 1);					//Map GPIO to slices/channel to our own channel index (saves math later)
-	setupPWMchannels(10, 2);					//Map GPIO to slices/channel to our own channel index (saves math later)
-	setupPWMchannels(12, 3);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	
+	if (remapAudio) {
+		setupPWMchannels(1, 2);					//Map GPIO to slices/channel to our own channel index (saves math later)
+		setupPWMchannels(0, 3);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	} else {
+		setupPWMchannels(10, 2);					//Map GPIO to slices/channel to our own channel index (saves math later)
+		setupPWMchannels(12, 3);					//Map GPIO to slices/channel to our own channel index (saves math later)
+	}
 	
 
 	for (int x = 0 ; x < 9 ; x++) {				//Setup the 9 GPIO used for controls
