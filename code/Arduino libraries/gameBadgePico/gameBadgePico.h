@@ -1,12 +1,12 @@
 //Game & graphics driver for gameBadgePico (MGC 2023)
-
 #ifndef gameBadgePico_h
 #define gameBadgePico_h
 
 #include "Arduino.h"
 #include "hardware/spi.h"
 
-	void gamebadge3init();
+	void gamebadge3init(bool remapAudio=false);		// Used for games that run on the initial version (MGC2023)
+	void gamebadge3binit();							// Used for games that run on the "B" version (MGC2024)
 	void setGPIObutton(int which);
 	void setButtonDebounce(int which, bool useDebounce, uint8_t frames);
 	
