@@ -331,8 +331,9 @@ int timeBonus;					//Pre-calc bonus for time (thanks CHAT-GPT, our new overlord 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
-	gamebadge3init(3);						//Init system
-
+	gamebadge3binit();						//Init system 2024 version (3B, SD card slot)
+  //gamebadge3init();						//Init system 2023 version (3, no SD card slot)
+  
 	menuTimer = 0;
 
 	//add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
