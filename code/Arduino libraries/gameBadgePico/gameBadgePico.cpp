@@ -1112,20 +1112,22 @@ void LCDlogic() {
 			}
 		break;
 		
-		case 1:										//Start LCD frame
-			gpio_put(27, 1);				//For scope timing
-			isRendering = true;
-			st7789_setAddressWindow(0, 0, 240, 240);	//Set entire LCD for drawing
-			st7789_ramwr();                       		//Switch to RAM writing mode dawg	
+		case 1:							//Start LCD frame
+			if (dma_channel_is_busy(lastDMA) == false) {		//if DMA is running, let it finish
+				gpio_put(27, 1);				//For scope timing
+				isRendering = true;
+				st7789_setAddressWindow(0, 0, 240, 240);	//Set entire LCD for drawing
+				st7789_ramwr();                       		//Switch to RAM writing mode dawg	
 
-			fineYsubCount = 0;						//This is stuff we used to setup in sendframe
-			fineYpointer = winYfine;
-			coarseY = winY;	
-			sp = &spriteBuffer[0];    				  //Use pointer so less math later on
-			renderRow = 0;
-			scrollYflag = 0;
-			isRendering = 1;
-			lcdState = 2;
+				fineYsubCount = 0;						//This is stuff we used to setup in sendframe
+				fineYpointer = winYfine;
+				coarseY = winY;	
+				sp = &spriteBuffer[0];    				  //Use pointer so less math later on
+				renderRow = 0;
+				scrollYflag = 0;
+				isRendering = 1;
+				lcdState = 2;
+			}
 		break;
 	
 		case 2:											//Render 1 row (240x16 pixels, or 120x8 fat pixels)
