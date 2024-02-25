@@ -1103,10 +1103,10 @@ bool getRenderStatus() {							//Core0 calls this to see if rendering is done, a
 void LCDlogic() {
 
 	switch(lcdState) {
-                // Wait 1µs after a DMA transfer before sending a new frame
+                // Wait until spi is not busy anymore  after a DMA transfer before sending a new frame
                 case 0:
-                        if (dma_channel_is_busy(lastDMA) == false) {
-                                sleep_us(1);
+                        if ((dma_channel_is_busy(lastDMA) == false) && (spi_is_busy(spi0) == false) ) {
+                                // sleep_us(1); 
                                 lcdState = 4 ;
                         // then fall-through to get immediately a new frame if core0 queued one.
                         } else break; // else stay in that state while dma is running
