@@ -1104,20 +1104,15 @@ void LCDlogic() {
 
 	switch(lcdState) {
                 // Wait until spi is not busy anymore  after a DMA transfer before sending a new frame
-                case 0:
+                case 0:  //Waiting for frame draw flag
                         if ((dma_channel_is_busy(lastDMA) == false) && (spi_is_busy(spi0) == false) ) {
-                                // sleep_us(1); 
-                                lcdState = 4 ;
-                        // then fall-through to get immediately a new frame if core0 queued one.
-                        } else break; // else stay in that state while dma is running
-                
-		case 4:		//Waiting for frame draw flag
-			if (localFrameDrawFlag == true) {		//Flag set?
-				localFrameDrawFlag = false;			//Always respond by clearing flag (even if we don't draw a new one because paused)			
-				if (LCDupdatePause == false) {		//LCD paused? Don't render a new frame (if pause set during frame it will complete, then wait for flag clear before next)
-					lcdState = 1;					//Advance to next state					
-				}
-			}
+                                if (localFrameDrawFlag == true) {		//Flag set?
+                                        localFrameDrawFlag = false;			//Always respond by clearing flag (even if we don't draw a new one because paused)			
+                                        if (LCDupdatePause == false) {		//LCD paused? Don't render a new frame (if pause set during frame it will complete, then wait for flag clear before next)
+                                                lcdState = 1;					//Advance to next state					
+                                        }
+                                }
+                        }
 		break;
 		
 		case 1:							//Start LCD frame
