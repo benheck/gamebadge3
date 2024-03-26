@@ -28,9 +28,9 @@ void setup() {
     gamebadge3init();
 
 
-    loadRGB("NEStari.pal");
-    loadPalette("basePalette.dat");
-    loadPattern("nesjukebox.nes", 0, 512);
+    loadRGB("nesjukebox/NEStari.pal");
+    loadPalette("nesjukebox/basePalette.dat");
+    loadPattern("nesjukebox/nesjukebox.nes", 0, 512);
 
     // Waveform generator timer - 64us = 15625Hz
     add_repeating_timer_us(WAVE_TIMER, wavegen_callback, NULL, &timerWFGenerator);
