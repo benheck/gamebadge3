@@ -1,47 +1,42 @@
 #include <gameBadgePico.h>
-#include "FamiPlayer.h"
-#include "SdFat.h"
+#include <GBAudio.h>
+#include "apu_capture.h"
 
 #define MAX_FILES       8
 #define FILENAME_LEN    13
 
-struct repeating_timer timer30Hz;           // This runs the game clock at 30Hz
 struct repeating_timer timer60Hz;           // Audio track timer
 struct repeating_timer timerWFGenerator;    // Timer for the waveform generator - 125KHz
 
-bool displayPause = false;
-bool paused = false;                        // Player pause, also you can set pause=true to pause the display while loading files
-bool nextFrameFlag = false;                 // The 30Hz ISR sets this flag, Core0 Loop responds to it
+int gameLoopState = 0;
+bool displayPauseState = false;
+volatile int nextFrameFlag = 0;             //The 30Hz IRS incs this, Core0 Loop responds when it reaches 2 or greater
 bool drawFrameFlag = false;                 // When Core0 Loop responses to nextFrameFlag, it sets this flag so Core1 will know to render a frame
 bool frameDrawing = false;                  // Set TRUE when Core1 is drawing the display. Core0 should wait for this to clear before accessing video memory
 
-FamiPlayer famiPlayer;
+
+GBAudio audio;
 
 uint8_t cursorX = 0;
 uint8_t cursorY = 2;
-FatFile root;
-FatFile audiofile;
-String fileList[MAX_FILES];
+
+uint8_t ALLBLACK[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+
 
 void setup() {
-    Serial.begin(9600);
 
     gamebadge3init();
 
-    // Start the timer for updating the display
-    add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);
 
-    // Waveform generator timer - 8us = 125000Hz
-    add_repeating_timer_us(8, wavegen_callback, NULL, &timerWFGenerator);
+    loadRGB("NEStari.pal");
+    loadPalette("basePalette.dat");
+    loadPattern("nesjukebox.nes", 0, 512);
+
+    // Waveform generator timer - 64us = 15625Hz
+    add_repeating_timer_us(WAVE_TIMER, wavegen_callback, NULL, &timerWFGenerator);
 
     // NTSC audio timer
-    add_repeating_timer_us(-16666, ntsc_audio_callback, NULL, &timer60Hz);
-
-    
-    if (loadRGB("NEStari.pal")) {
-        loadPalette("basePalette.dat");
-        loadPattern("nesjukebox.nes", 0, 512);
-    }
+    add_repeating_timer_us(AUDIO_TIMER, sixtyHz_callback, NULL, &timer60Hz);
 
     // Set up debouncing for UDLR
     setButtonDebounce(up_but, true, 1);
@@ -49,12 +44,13 @@ void setup() {
     setButtonDebounce(left_but, true, 1);
     setButtonDebounce(right_but, true, 1);
 
-    // Load audio tracks
-    famiPlayer.AddTrack("/jukebox/smb1.dat", 0);
-    famiPlayer.AddTrack("/jukebox/smb2.dat", 1);
-    famiPlayer.AddTrack("/jukebox/megaman.dat", 2);
-    famiPlayer.AddTrack("/jukebox/doubledragon.dat", 3);
-    famiPlayer.AddTrack("/jukebox/gradius.dat", 4);
+    LoadTilePage(0, 0, ALLBLACK);
+
+    audio.AddTrack(smb, 0);
+    audio.AddTrack(smb2, 1);
+    audio.AddTrack(megaman, 2);
+    audio.AddTrack(ddragon, 3);
+    audio.AddTrack(gradius, 4);
 }
 
 void setup1() {
@@ -63,49 +59,61 @@ void setup1() {
 }
 
 void loop() {
-    if (nextFrameFlag == true) {		    //Flag from the 30Hz ISR?
-        nextFrameFlag = false;			    //Clear that flag		
-        drawFrameFlag = true;			      //and set the flag that tells Core1 to draw the LCD
+    if (nextFrameFlag > 1) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
+    
+		nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)
+		LCDsetDrawFlag();				//Tell core1 to start drawing a frame
 
-        GameLoop();					            //Now do our game logic in Core0
-            
-        serviceDebounce();              // Debounce buttons - must be called every frame
-    }
+		if (gameLoopState == 0) {		//If the last game logic loop has finished, start the next
+			gameLoopState = 1;			
+		}
+
+		serviceDebounce();				//Debounce buttons
+	}
+	gameLoopLogic();					//Check this every loop frame
 }
 
 void loop1() {
-    // If flag set to draw display
-    if (drawFrameFlag == true) {			
-        drawFrameFlag = false;				  //Clear flag
-        
-        if (displayPause == true) {     //If system paused, return (no draw)
-            return;
-        }
+    LCDlogic();
+}
 
-        frameDrawing = true;            //Set flag that we're drawing a frame. Core0 should avoid accessing video memory if this flag is TRUE
-        sendFrame();
-        frameDrawing = false;           //Clear flag. Core0 is now free to access screen memory (I guess this core could as well?)
-    }
+/*************************************************************************
+* gameLoopLogic
+* Advances the state machine for the main game logic.
+*************************************************************************/
+void gameLoopLogic() {
+	switch(gameLoopState) {
+	
+		case 0:
+			//Do nothing (is set to 1 externally)
+		break;
+		
+		case 1:		
+			serviceAudio();						//Service PCM audio file streaming while Core1 draws the screens (gives Core0 something to do while we wait for vid mem access)
+			gameLoopState = 2;
+		break;		
+		
+		case 2:									//Done with our audio, now waiting for frame to finish rendering (we can start our logic during the final DMA)
+			if (getRenderStatus() == false) {	//Wait for core 1 to finish drawing frame
+				gameLoopState = 3;				//Jump to next check
+			}
+		break;
+		
+		case 3:									//Frame started?
+			GameLoop();	
+			gameLoopState = 0;					//Done, wait for next frame flag
+		break;			
+	}	
 }
 
 /*************************************************************************
 * GameLoop
 * THis is the main game loop, which runs at 30Hz.
 *************************************************************************/
-void GameLoop() { 
-    if (!displayPause) {                  // If the display is being actively refreshed we need to wait before accessing video RAM
-        while(!frameDrawing) {            // Wait for Core1 to begin rendering the frame
-            delayMicroseconds(1);         // Do almost nothing (arduino doesn't like empty while()s)
-        }
+void GameLoop() {
+    // Handle Player Input
+    HandleButtons();
 
-        // Do game logic that doesn't access video memory
-        HandleButtons();
-
-        while(frameDrawing) {             // Done with non-video logic; wait for Core 1 to finish drawing
-            delayMicroseconds(1);
-        }
-    }
-    
     // Now access video memory. We have ~15ms to do this before the next frame starts
     //.       0123456789ABCDE
     drawText(  "NES Jukebox",   2, 0);
@@ -143,13 +151,13 @@ void HandleButtons()
 
     if (button(A_but)) {
         int selectedTrack = cursorY - 2;
-        famiPlayer.PlayTrack(selectedTrack);          
+        audio.PlayTrack(selectedTrack, true);          
     }
 
     if (button(B_but)) {
         for (int i = 0; i < 8; i++) {
-            if (famiPlayer.IsPlaying(i)) {
-                famiPlayer.StopTrack(i);
+            if (audio.IsTrackPlaying(i)) {
+                audio.StopTrack(i);
             }
         }
     }
@@ -161,18 +169,26 @@ void HandleButtons()
     }
 }
 
-//Every 33ms, set the flag that it's time to draw a new frame (it's possible system might miss one but that's OK)
-bool timer_isr(struct repeating_timer *t) {				
-    nextFrameFlag = true;
+/*************************************************************************
+* LoadTilePage
+* Loads a screen of tiles onto the name table
+*************************************************************************/
+void LoadTilePage(uint16_t srcPage, uint8_t dstPage, uint8_t *tiles)
+{
+    for (uint8_t x = 0; x < 15; x++) 
+        for (uint8_t y = 0; y < 15; y++) {
+            uint8_t tileIdx = tiles[x+srcPage*15+y*15];
+            drawTile(x+dstPage*15, y, tileIdx, 0);
+        }
+}
+
+bool sixtyHz_callback(struct repeating_timer *t) {
+    audio.ServiceTracks();	
+	nextFrameFlag += 1;								//When main loop sees this reach 2, run 30Hz game logic	
     return true;
 }
 
 bool wavegen_callback(struct repeating_timer *t) {
-    famiPlayer.ProcessWave();
-    return true;
-}
-
-bool ntsc_audio_callback(struct repeating_timer *t) {
-    famiPlayer.serviceTracks();
+    audio.ProcessWaveforms();
     return true;
 }
