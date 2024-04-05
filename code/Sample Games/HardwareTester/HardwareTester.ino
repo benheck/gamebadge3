@@ -1,63 +1,71 @@
 #include <gameBadgePico.h>
 #include <GBAudio.h>
+#include "hardware/adc.h"
 #include "apu_capture.h"
 
-#define MAX_FILES       8
-#define FILENAME_LEN    13
+#define SCREEN_W            120             // Width of the screen, in pixels
+#define SCREEN_H            120             // Height of the screen, in pixels
 
 struct repeating_timer timer60Hz;           // Audio track timer
 struct repeating_timer timerWFGenerator;    // Timer for the waveform generator - 125KHz
 
-int gameLoopState = 0;
-bool displayPauseState = false;
+bool paused = false;                        // Player pause, also you can set pause=true to pause the display while loading files
 volatile int nextFrameFlag = 0;             //The 30Hz IRS incs this, Core0 Loop responds when it reaches 2 or greater
 bool drawFrameFlag = false;                 // When Core0 Loop responses to nextFrameFlag, it sets this flag so Core1 will know to render a frame
 bool frameDrawing = false;                  // Set TRUE when Core1 is drawing the display. Core0 should wait for this to clear before accessing video memory
+int gameLoopState = 0;
 
 
 GBAudio audio;
 
-uint8_t cursorX = 0;
-uint8_t cursorY = 2;
-
 uint8_t ALLBLACK[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
 
+/*************************************************************************
+* setup
+* Set up function for Core 0. Use this to initialize the gameBadge3
+* library, load graphics, audio, and another needed initializations
+*************************************************************************/
 void setup() {
 
-    gamebadge3init();
-
-
-    loadRGB("nesjukebox/NEStari.pal");
-    loadPalette("nesjukebox/basePalette.dat");
-    loadPattern("nesjukebox/nesjukebox.nes", 0, 512);
+    // Initialize the gameBadge3
+    gamebadge3binit();
 
     // Waveform generator timer - 64us = 15625Hz
     add_repeating_timer_us(WAVE_TIMER, wavegen_callback, NULL, &timerWFGenerator);
 
     // NTSC audio timer
     add_repeating_timer_us(AUDIO_TIMER, sixtyHz_callback, NULL, &timer60Hz);
-
+    
     // Set up debouncing for UDLR
-    setButtonDebounce(up_but, true, 1);
-    setButtonDebounce(down_but, true, 1);
-    setButtonDebounce(left_but, true, 1);
-    setButtonDebounce(right_but, true, 1);
+    setButtonDebounce(up_but, false, 1);
+    setButtonDebounce(down_but, false, 1);
+    setButtonDebounce(left_but, false, 1);
+    setButtonDebounce(right_but, false, 1);
+    setButtonDebounce(A_but, false, 1);
+    setButtonDebounce(B_but, false, 1);
+    setButtonDebounce(C_but, false, 1);
+    setButtonDebounce(start_but, false, 1);
+    setButtonDebounce(select_but, false, 1);
 
-    LoadTilePage(0, 0, ALLBLACK);
-
-    audio.AddTrack(smb, 0);
-    audio.AddTrack(smb2, 1);
-    audio.AddTrack(megaman, 2);
-    audio.AddTrack(ddragon, 3);
-    audio.AddTrack(gradius, 4);
+    // Import audio
+    audio.AddTrack(ddragon, 0);
 }
 
+/*************************************************************************
+* setup1
+* Setup function for Core1. Nothing to do in here
+*************************************************************************/
 void setup1() {
-
     
 }
 
+/*************************************************************************
+* loop
+* Main logic loop for Core 0. This tracks the 60Hz timer, and sets a flag
+* every other frame (30Hz) to tell Core 1 to start drawing. It will also
+* fire off the game loop at 30Hz.
+*************************************************************************/
 void loop() {
     if (nextFrameFlag > 1) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
     
@@ -73,6 +81,10 @@ void loop() {
 	gameLoopLogic();					//Check this every loop frame
 }
 
+/*************************************************************************
+* loop1
+* Main loop for Core 1. Draws the LCD.
+*************************************************************************/
 void loop1() {
     LCDlogic();
 }
@@ -108,23 +120,26 @@ void gameLoopLogic() {
 
 /*************************************************************************
 * GameLoop
-* THis is the main game loop, which runs at 30Hz.
+* This is the main game loop, for when the player is actively playing the
+* game. 
 *************************************************************************/
-void GameLoop() {
-    // Handle Player Input
+void GameLoop() { 
+    LoadTilePage(0, 0, ALLBLACK);
+
+    //        0123456789ABCDE
+    drawText("   HW TESTER", 0, 0, false);
+
+    if (!audio.IsTrackPlaying(0)) {
+        //        0123456789ABCDE
+        drawText(" SELECT AND A  ", 0, 12, false);
+        drawText(" TO TEST AUDIO ", 0, 13, false);
+    } else {
+        //        0123456789ABCDE
+        drawText(" AUDIO PLAYING ", 0, 11, false);
+        drawText(" SELECT AND B  ", 0, 12, false);
+        drawText(" TO STOP AUDIO ", 0, 13, false);
+    }
     HandleButtons();
-
-    // Now access video memory. We have ~15ms to do this before the next frame starts
-    //.       0123456789ABCDE
-    drawText(  "NES Jukebox",   2, 0);
-    drawText( "Super Mario",    1, 2);
-    drawText( "Super Mario 2",  1, 3);
-    drawText( "Mega Man",       1, 4);
-    drawText( "Double Dragon",  1, 5);
-    drawText( "Gradius",        1, 6);
-    drawText("A=Play | B=Stop", 0, 14);
-
-    drawSprite(cursorX << 3, cursorY << 3, 1, 0);
 }
 
 /*************************************************************************
@@ -133,41 +148,61 @@ void GameLoop() {
 *************************************************************************/
 void HandleButtons()
 {
-    if (button(right_but)) {
-        
+    if (button(right_but)) {                        // Player pressing right button?
+    //        0123456789ABCDE
+    drawText("     RIGHT", 0, 7, false);
     }
 
-    if (button(left_but)) {
-        
+    if (button(left_but)) {                         // Player pressing left button?
+    //        0123456789ABCDE
+    drawText("     LEFT", 0, 7, false);
     }
 
-    if (button(up_but)) {
-        if (cursorY > 2) cursorY--;
+    if (button(up_but)) {                           // Player pressing up button?
+    //        0123456789ABCDE
+    drawText("       UP", 0, 7, false);
     }
 
-    if (button(down_but)) {
-        if (cursorY < 6) cursorY++;
+    if (button(down_but)) {                         // Player pressing down button?
+    //        0123456789ABCDE
+    drawText("     DOWN", 0, 7, false);
     }
 
-    if (button(A_but)) {
-        int selectedTrack = cursorY - 2;
-        audio.PlayTrack(selectedTrack, true);          
+    if (button(B_but)) {                            // If the player presses B
+    //        0123456789ABCDE
+    drawText("       B", 0, 7, false);
     }
 
-    if (button(B_but)) {
-        for (int i = 0; i < 8; i++) {
-            if (audio.IsTrackPlaying(i)) {
-                audio.StopTrack(i);
-            }
-        }
+    if (button(A_but)) {                            // If the player presses A
+    //        0123456789ABCDE
+    drawText("       A", 0, 7, false);
+    
     }
 
-    if (button(C_but)) {
+    if (button(C_but)) {                            // If the player presses C
+    //        0123456789ABCDE
+    drawText("       C", 0, 7, false);
     }
 
-    if (button(start_but)) {
+    if (button(start_but)) {                        // If the player presses START
+    //        0123456789ABCDE
+    drawText("     START", 0, 7, false);
+    }
+
+    if (button(select_but)) {                       // If the player presses SELECT
+    //        0123456789ABCDE
+    drawText("    SELECT", 0, 7, false);
+    }
+
+    if (button(select_but) && button(A_but)) {                       // If the player presses SELECT
+        audio.PlayTrack(0);    
+    }
+
+    if (button(select_but) && button(B_but)) {                       // If the player presses SELECT
+        audio.StopTrack(0);    
     }
 }
+
 
 /*************************************************************************
 * LoadTilePage
