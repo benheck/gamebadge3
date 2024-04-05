@@ -8,8 +8,13 @@ $programs = @(
     @("NES Jukebox", "$currentScriptPath\..\Sample Games\NESJukebox\nesjukebox.uf2", "$currentScriptPath\..\Sample Games\NESJukebox\nesjukebox", "nesjukebox\"),
     @("NES Jukebox 3B", "$currentScriptPath\..\Sample Games\NESJukebox\nesjukebox-3b.uf2", "$currentScriptPath\..\Sample Games\NESJukebox\nesjukebox", "nesjukebox\"),
     @("Hardware Tester", "$currentScriptPath\..\Sample Games\HardwareTester\HardwareTester.uf2", $null, $null),
-    @("Emulator - C64", "$currentScriptPath\..\emulators\pico64.uf2", $null, $null),
-    @("Emulator - Atari VCS", "$currentScriptPath\..\emulators\picovcs.uf2", $null, $null)
+    @("Emulator - C64", "$currentScriptPath\..\emulators\commodore_64.uf2", $null, $null),
+    @("Emulator - Atari VCS", "$currentScriptPath\..\emulators\atari_2600.uf2", $null, $null),
+    @("Emulator - Atari 800", "$currentScriptPath\..\emulators\atari_800.uf2", $null, $null),
+    @("Emulator - Atari 5200", "$currentScriptPath\..\emulators\atari_5200.uf2", $null, $null),
+    @("Emulator - Coleco Vision", "$currentScriptPath\..\emulators\coleco_vision.uf2", $null, $null),
+    @("Emulator - Magnavox Odyssey", "$currentScriptPath\..\emulators\odyssey_2.uf2", $null, $null),
+    @("Emulator - Gameboy", "$currentScriptPath\..\emulators\gameboy.uf2", $null, $null)
 )
 
 function Check-USBDrivePresence {
@@ -77,14 +82,14 @@ function main {
     }
 
     $selection = Read-Host "Enter the number of the program you want to load"
-
     ## 
     ## Exit the script if a user doesn't select a valid option
     ##
-    if (-not $selection -or $selection -lt 1 -or $selection -gt $programs.Count) {
-        InfoMessage "Invalid selection. Ending script."
-        return
-    }
+    # if ($selection -lt 1 -or $selection -gt $programs.Count) {
+    #     InfoMessage "Invalid selection. Ending script."
+    #     InfoMessage $selection
+    #     return
+    # }
 
     ##
     ## Confirm the user's selection
