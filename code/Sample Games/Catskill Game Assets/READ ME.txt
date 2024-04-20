@@ -1,0 +1,3 @@
+Copy the contents of the _flash MSD contents folder to the Pico USB "thumb drive"
+
+See the README.TXT in that folder for more details

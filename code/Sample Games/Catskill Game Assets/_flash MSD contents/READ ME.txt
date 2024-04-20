@@ -1,4 +1,8 @@
 This folder contains the files/folders that should be placed in the root directory of the Pi Pico's USB "EXT FLASH" when connected to a PC.
+
+Copy the contents of this folder (not the folder itself) into the root directory of the Pi Pico. There should be 10 items in the root of the Pico (9 folders and this README.TXT file)
+
+
 These files are for the "Catskillvania" game
 
 NES - pattern tables (tiles and sprites)
