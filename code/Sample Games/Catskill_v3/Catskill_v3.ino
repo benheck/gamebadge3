@@ -332,9 +332,11 @@ int timeBonus;					//Pre-calc bonus for time (thanks CHAT-GPT, our new overlord 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
-	gamebadge3binit();						//Init system 2024 version (3B, SD card slot)
-  //gamebadge3init();						//Init system 2023 version (3, no SD card slot)
-  
+  //Comment in which GB you have for the Bud Game
+	//gamebadge3init(false, 1, false);			//Init system 2023 version (GB3, /CS, no SD card slot, Waveshare ST7789) https://www.amazon.com/dp/B09QG49MG8?ref=nb_sb_ss_w_as-reorder_k0_1_10&amp=&crid=1P7KMG0DVQN72&amp=&sprefix=waveshare+
+  //gamebadge3init(true, 1, false);				//Init system 2024/2025 version (GB3B, /CS, +SD card slot, Waveshare ST7789)
+  gamebadge3init(true, 2, true, -1);			//(GB3C, no /CS SD card slot, Makerfab ST7789v3)	https://www.makerfabs.com/1-3-inch-colorful-tft-module-st7789.html
+
 	menuTimer = 0;
 
 	//add_repeating_timer_ms(-33, timer_isr, NULL, &timer30Hz);		//Start 30Hz interrupt timer. This drives the whole system
@@ -372,7 +374,7 @@ void setup1() { //-----------------------Core 1 builds the tile display and send
 }
 
 void loop() {	//-----------------------Core 0 handles the main logic loop
-	
+
 	if (nextFrameFlag > 1) {			//Counter flag from the 60Hz ISR, 2 ticks = 30 FPS
 	
 		nextFrameFlag -= 2;				//Don't clear it, just sub what we're "using" in case we missed a frame (maybe this isn't best with slowdown?)

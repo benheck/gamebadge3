@@ -90,21 +90,19 @@ uint8_t debounceTimer[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};    							//The debounce
 uint8_t slice_numbers[4];
 uint8_t chan_nummbers[4];
 
-const struct st7789_config lcd_config = {
-    .spi      = PICO_DEFAULT_SPI_INSTANCE,
-    .gpio_din = PICO_DEFAULT_SPI_TX_PIN,
-    .gpio_clk = PICO_DEFAULT_SPI_SCK_PIN,
-    .gpio_cs  = PICO_DEFAULT_SPI_CSN_PIN,
-    .gpio_dc  = 20,
-    .gpio_rst = 21,
-    .gpio_bl  = 22
+struct st7789_config lcd_config = {
+    .spi      = spi0,      // Default SPI instance
+    .gpio_din = 19,        // Default MOSI pin
+    .gpio_clk = 18,        // Default SCK pin
+    .gpio_cs  = 17,        // Default CS pin  (ST7789v3 does not use)
+    .gpio_dc  = 20,        // Custom pin for DC
+    .gpio_rst = 21,        // Custom pin for RST
+    .gpio_bl  = 22,         // Custom pin for backlight
+	.rotation = 0,			
+	.isV3 = false		   //ST7789 type
 };
 
-void gamebadge3binit() {
-	gamebadge3init(true);
-}
-
-void gamebadge3init(bool remapAudio) {				//Sets up gamebadge and a bunch of other crap
+void gamebadge3init(bool remapAudio, int rotation, bool V3, int CSpin) {				//Sets up gamebadge and a bunch of other crap
 
 	flash.begin();
 
@@ -124,9 +122,12 @@ void gamebadge3init(bool remapAudio) {				//Sets up gamebadge and a bunch of oth
 	//Serial.print("JEDEC ID: 0x"); Serial.println(flash.getJEDECID(), HEX);
 	//Serial.print("Flash size: "); Serial.print(flash.size() / 1024); Serial.println(" KB");
 
+	lcd_config.gpio_cs = CSpin;					//override in
+	lcd_config.rotation = rotation;
+	lcd_config.isV3 = V3;
+
 	st7789_init(&lcd_config, 240, 240);			//Set up LCD for great justice
-	st7789_setRotation(1);						//Ribbon cable on left side of display
-	
+
 	gpio_init(15);								//Pinout for scope timing checks
 	gpio_set_dir(15, GPIO_OUT);
 	gpio_put(15, 0);

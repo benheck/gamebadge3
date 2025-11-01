@@ -5,8 +5,12 @@
 #include "Arduino.h"
 #include "hardware/spi.h"
 
-	void gamebadge3init(bool remapAudio=false);		// Used for games that run on the initial version (MGC2023)
-	void gamebadge3binit();							// Used for games that run on the "B" version (MGC2024)
+	void gamebadge3init(bool remapAudio = false, int rotation = 1, bool V3 = false, int CSpin = 17);		//Gamebadge 2024-2025 defaults
+
+	// Games that run on the initial version, Waveshare (MGC2023) false, 1, false
+	// Games that run on the "B" version with SD card, Waveshare (MGC2024/2025) true, 1, false
+	// SD card, ST7789v3 module (Makerfabs) true, 2, true
+					
 	void setGPIObutton(int which);
 	void setButtonDebounce(int which, bool useDebounce, uint8_t frames);
 	
