@@ -332,8 +332,9 @@ int timeBonus;					//Pre-calc bonus for time (thanks CHAT-GPT, our new overlord 
 //Master loops
 void setup() { //------------------------Core0 handles the file system and game logic
 
-	gamebadge3binit();						//Init system 2024 version (3B, SD card slot)
-  //gamebadge3init();						//Init system 2023 version (3, no SD card slot)
+	gamebadge3init(true, 2, true);		//Init system 2026 version (3C, SD card slot, ST7789V3 LCD)
+	//gamebadge3init(true);						//Init system 2024 version (3B, SD card slot)
+  //gamebadge3init();							  //Init system 2023 version (3, no SD card slot)
   
 	menuTimer = 0;
 
