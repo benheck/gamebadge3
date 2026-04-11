@@ -1,4 +1,5 @@
 # flash_batch.ps1 — Flash gameBadge combined UF2 to multiple Picos in sequence.
+# Copies UF2 to the RPI-RP2 drive. No extra tools or drivers needed.
 # Plug each Pico in BOOTSEL mode, press Enter to flash, repeat.
 #
 # Usage: .\flash_batch.ps1 [-UF2 path\to\combined.uf2]
@@ -9,40 +10,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Find picotool on PATH, common install locations, or local directory
-function Find-Picotool {
-    $candidate = Get-Command picotool -ErrorAction SilentlyContinue
-    if ($candidate) { return $candidate.Source }
-
-    $searchPaths = @(
-        ".\picotool.exe",
-        "$env:USERPROFILE\.pico-sdk\picotool\*\picotool.exe",
-        "$env:LOCALAPPDATA\Programs\Raspberry Pi\Pico SDK*\picotool\*\picotool.exe",
-        "C:\Program Files\Raspberry Pi\Pico SDK*\picotool\*\picotool.exe",
-        "$env:PICO_SDK_PATH\..\picotool\picotool.exe"
-    )
-
-    foreach ($pattern in $searchPaths) {
-        $found = Get-Item $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { return $found.FullName }
-    }
-
-    return $null
-}
-
-$picotool = Find-Picotool
-if (-not $picotool) {
-    Write-Host "ERROR: picotool not found." -ForegroundColor Red
-    Write-Host "Install it or place picotool.exe in this directory."
-    Write-Host "Download: https://github.com/raspberrypi/picotool/releases"
-    exit 1
-}
-Write-Host "Using picotool: $picotool" -ForegroundColor DarkGray
-
-# Resolve UF2 path
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 if (-not $UF2) {
-    $UF2 = Join-Path $scriptDir "build\gamebadge_combined.uf2"
+    $UF2 = Join-Path $PSScriptRoot "gamebadge_combined.uf2"
 }
 if (-not (Test-Path $UF2)) {
     Write-Host "ERROR: UF2 not found: $UF2" -ForegroundColor Red
@@ -69,21 +38,20 @@ while ($true) {
     $input = Read-Host
     if ($input -eq 'q') { break }
 
-    # Wait for device
+    # Wait for RPI-RP2 drive
     Write-Host -NoNewline "Waiting for device"
     $tries = 0
-    $found = $false
-    while (-not $found) {
-        $result = & $picotool info 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $found = $true
-        } else {
+    $drive = $null
+    while (-not $drive) {
+        $drive = Get-Volume -FileSystemLabel "RPI-RP2" -ErrorAction SilentlyContinue |
+                 ForEach-Object { "$($_.DriveLetter):\" }
+        if (-not $drive) {
             Start-Sleep -Milliseconds 500
             Write-Host -NoNewline "."
             $tries++
             if ($tries -ge 20) {
                 Write-Host ""
-                Write-Host "  No device found after 10s. Check connection and BOOTSEL mode." -ForegroundColor Red
+                Write-Host "  No device found after 10s. Hold BOOTSEL while plugging in USB." -ForegroundColor Red
                 Write-Host "  Press Enter to retry, or 'q' to quit."
                 $input = Read-Host
                 if ($input -eq 'q') { break }
@@ -92,31 +60,32 @@ while ($true) {
             }
         }
     }
-    if (-not $found) { break }
-    Write-Host " found!"
+    if (-not $drive) { break }
+    Write-Host " found at $drive"
 
     # Flash
-    Write-Host "Flashing..." -ForegroundColor Cyan
-    & $picotool load $UF2
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "FLASH FAILED - check connection and retry." -ForegroundColor Red
-        continue
-    }
+    Write-Host "Copying UF2..." -ForegroundColor Cyan
+    Copy-Item $UF2 -Destination $drive -Force
 
-    # Verify
-    Write-Host "Verifying..." -ForegroundColor Cyan
-    $verifyOutput = & $picotool verify $UF2 2>&1
-    $verifyOutput | Select-Object -Last 4 | Write-Host
-    if ($verifyOutput -match "ERROR") {
-        Write-Host "VERIFY FAILED - do not use this unit. Reflash." -ForegroundColor Red
-        continue
+    # Wait for device to disconnect (it reboots after receiving UF2)
+    Write-Host -NoNewline "Waiting for reboot"
+    $rebooted = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Milliseconds 500
+        Write-Host -NoNewline "."
+        if (-not (Get-Volume -FileSystemLabel "RPI-RP2" -ErrorAction SilentlyContinue)) {
+            $rebooted = $true
+            break
+        }
     }
+    Write-Host ""
 
-    # Reboot
     $count++
-    Write-Host "Rebooting..."
-    & $picotool reboot 2>&1 | Out-Null
-    Write-Host "Pico #$count done!" -ForegroundColor Green
+    if ($rebooted) {
+        Write-Host "Pico #$count done!" -ForegroundColor Green
+    } else {
+        Write-Host "Pico #$count flashed (power cycle if it doesn't start)." -ForegroundColor Yellow
+    }
     Write-Host ""
 }
 
